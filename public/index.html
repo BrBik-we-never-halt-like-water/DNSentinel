@@ -42,6 +42,14 @@
     }
 
     html { scroll-behavior: smooth; }
+
+    /* Keyboard focus visibility (a11y) — only shows for keyboard users, not mouse clicks */
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: 6px;
+    }
+    :focus:not(:focus-visible) { outline: none; }
     body {
       background: var(--bg);
       color: var(--text);
@@ -459,6 +467,12 @@
       from { opacity: 0; transform: translateY(10px); }
       to   { opacity: 1; transform: translateY(0); }
     }
+    /* Cards fade/lift in as each panel's data arrives (fires once on insertion). */
+    [id^="pane-"] .card { animation: cardIn 0.4s ease both; }
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
 
     /* ══ DNS RECORDS ═════════════════════════════════════════════ */
     #dnsGrid { display: flex; flex-direction: column; gap: 14px; }
@@ -680,6 +694,37 @@
 
     .err-box { padding: 20px 22px; color: var(--err); font-size: 13px; font-family: 'JetBrains Mono', monospace; }
 
+    /* ══ TOASTS ══════════════════════════════════════════════════ */
+    .toast-stack {
+      position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+      display: flex; flex-direction: column; gap: 10px; pointer-events: none;
+      max-width: min(360px, calc(100vw - 32px));
+    }
+    .toast {
+      pointer-events: auto;
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 12px 14px; border-radius: 12px;
+      background: var(--bg-card-hi); border: 1px solid var(--border-hi);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+      color: var(--text); font-size: 13px; line-height: 1.4;
+      animation: toastIn 0.32s cubic-bezier(.16,1,.3,1);
+      border-left: 3px solid var(--accent);
+    }
+    .toast.leaving { animation: toastOut 0.28s ease forwards; }
+    .toast .toast-ico { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; }
+    .toast .toast-ico svg { width: 16px; height: 16px; }
+    .toast-msg { flex: 1; }
+    .toast.ok   { border-left-color: var(--ok);   color: var(--text); }
+    .toast.ok   .toast-ico { color: var(--ok); }
+    .toast.err  { border-left-color: var(--err); }
+    .toast.err  .toast-ico { color: var(--err); }
+    .toast.warn { border-left-color: var(--warn); }
+    .toast.warn .toast-ico { color: var(--warn); }
+    .toast.info .toast-ico { color: var(--accent); }
+    @keyframes toastIn  { from{opacity:0;transform:translateY(12px) scale(.96)} to{opacity:1;transform:none} }
+    @keyframes toastOut { to{opacity:0;transform:translateX(24px) scale(.96)} }
+
     /* ══ FOOTER ══════════════════════════════════════════════════ */
     .footer {
       border-top: 1px solid rgba(6,182,212,0.12);
@@ -715,6 +760,162 @@
     }
     .btn-export:hover { background: rgba(16,185,129,.12); border-color: var(--brand-border); color: var(--brand); }
     .btn-export svg { width:13px; height:13px; flex-shrink:0; }
+    .hdr-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+    /* ══ SECURITY SCORECARD ══════════════════════════════════════ */
+    .scorecard { padding: 22px 24px; margin-bottom: 18px; }
+    .sc-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+    .sc-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .sc-title svg { width: 17px; height: 17px; color: var(--brand); }
+    .sc-counts { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+    .sc-count {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 600; padding: 4px 11px; border-radius: 999px;
+      border: 1px solid var(--border); color: var(--text-dim);
+    }
+    .sc-count .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .sc-count.crit { color: var(--err); border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.07); }
+    .sc-count.crit .dot { background: var(--err); }
+    .sc-count.high { color: #fb7185; border-color: rgba(251,113,133,.3); background: rgba(251,113,133,.07); }
+    .sc-count.high .dot { background: #fb7185; }
+    .sc-count.med  { color: var(--warn); border-color: rgba(245,158,11,.3); background: rgba(245,158,11,.07); }
+    .sc-count.med  .dot { background: var(--warn); }
+    .sc-count.good { color: var(--ok); border-color: rgba(34,197,94,.3); background: rgba(34,197,94,.07); }
+    .sc-count.good .dot { background: var(--ok); }
+    .sc-list { display: flex; flex-direction: column; gap: 8px; }
+    .sc-item {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 11px 14px; border-radius: 11px;
+      background: rgba(255,255,255,.02); border: 1px solid var(--border);
+      border-left-width: 3px; transition: background .15s, border-color .15s;
+    }
+    .sc-item:hover { background: rgba(255,255,255,.04); }
+    .sc-item.crit { border-left-color: var(--err); }
+    .sc-item.high { border-left-color: #fb7185; }
+    .sc-item.med  { border-left-color: var(--warn); }
+    .sc-item.low  { border-left-color: var(--info); }
+    .sc-item.good { border-left-color: var(--ok); }
+    .sc-sev {
+      font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+      padding: 3px 7px; border-radius: 6px; flex-shrink: 0; margin-top: 1px; min-width: 60px; text-align: center;
+    }
+    .sc-sev.crit { color: var(--err);  background: rgba(239,68,68,.12); }
+    .sc-sev.high { color: #fb7185;     background: rgba(251,113,133,.12); }
+    .sc-sev.med  { color: var(--warn); background: rgba(245,158,11,.12); }
+    .sc-sev.low  { color: var(--info); background: rgba(96,165,250,.12); }
+    .sc-sev.good { color: var(--ok);   background: rgba(34,197,94,.12); }
+    .sc-body { flex: 1; min-width: 0; }
+    .sc-item-title { font-size: 13px; font-weight: 600; color: var(--text); }
+    .sc-item-detail { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.45; }
+    .sc-view {
+      flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--text-muted);
+      background: none; border: 1px solid var(--border); border-radius: 7px;
+      padding: 4px 10px; cursor: pointer; transition: all .15s; white-space: nowrap; align-self: center;
+    }
+    .sc-view:hover { color: var(--accent); border-color: var(--accent-border); background: rgba(6,182,212,.06); }
+    .sc-empty { font-size: 13px; color: var(--text-muted); padding: 8px 2px; }
+    .sc-badge-row { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+    .sc-badge-lbl { font-size: 11px; color: var(--text-faint); }
+
+    /* ══ COMPARE & HISTORY ═══════════════════════════════════════ */
+    .hero-tools { display: flex; justify-content: center; margin-top: 18px;
+      animation: fadeSlideUp 0.7s 0.6s ease both; }
+    .hero-tool-btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,.03); border: 1px solid var(--border);
+      color: var(--text-muted); font-family: 'Space Grotesk', sans-serif;
+      font-size: 13px; font-weight: 600; padding: 9px 16px; border-radius: 10px;
+      cursor: pointer; transition: all .18s;
+    }
+    .hero-tool-btn:hover { color: var(--accent); border-color: var(--accent-border); background: rgba(6,182,212,.06); }
+    .hero-tool-btn svg { width: 15px; height: 15px; }
+
+    .cmp-overlay {
+      position: fixed; inset: 0; z-index: 1000; display: none;
+      align-items: flex-start; justify-content: center;
+      background: rgba(3,3,12,.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      padding: 40px 16px; overflow-y: auto;
+    }
+    .cmp-overlay.open { display: flex; animation: cmpFade .22s ease; }
+    @keyframes cmpFade { from{opacity:0} to{opacity:1} }
+    .cmp-panel {
+      width: 100%; max-width: 860px; background: var(--bg-card-hi);
+      border: 1px solid var(--border-hi); border-radius: 18px; padding: 22px 24px;
+      box-shadow: 0 30px 80px rgba(0,0,0,.55); animation: cmpSlide .28s cubic-bezier(.16,1,.3,1);
+    }
+    @keyframes cmpSlide { from{transform:translateY(16px);opacity:0} to{transform:none;opacity:1} }
+    .cmp-head { display: flex; align-items: center; margin-bottom: 18px; }
+    .cmp-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 9px; }
+    .cmp-title svg { width: 18px; height: 18px; color: var(--brand); }
+    .cmp-close { margin-left: auto; background: none; border: 1px solid var(--border);
+      border-radius: 9px; color: var(--text-muted); padding: 7px; cursor: pointer; transition: all .15s;
+      display: flex; align-items: center; }
+    .cmp-close:hover { color: var(--text); border-color: var(--border-hi); background: rgba(255,255,255,.05); }
+    .cmp-close svg { width: 16px; height: 16px; }
+    .cmp-selectors { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .cmp-select {
+      flex: 1; min-width: 0; background: rgba(255,255,255,.04); border: 1px solid var(--border);
+      border-radius: 10px; color: var(--text); font-family: 'JetBrains Mono', monospace;
+      font-size: 13px; padding: 10px 12px; cursor: pointer; outline: none;
+    }
+    .cmp-select:focus { border-color: var(--accent); }
+    .cmp-vs { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; }
+    .cmp-grid { width: 100%; border-collapse: collapse; }
+    .cmp-grid th, .cmp-grid td { padding: 10px 12px; text-align: left; font-size: 13px;
+      border-bottom: 1px solid var(--border); }
+    .cmp-grid th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); font-weight: 700; }
+    .cmp-grid td.metric { color: var(--text-muted); font-size: 12px; }
+    .cmp-grid td.val { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+    .cmp-grid .winner { color: var(--ok); }
+    .cmp-grid .loser  { color: var(--text-dim); }
+    .cmp-empty { font-size: 13px; color: var(--text-muted); padding: 18px 2px; text-align: center; }
+    .cmp-hist-head { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+      color: var(--text-faint); font-weight: 700; margin: 22px 0 10px; }
+    .cmp-history { display: flex; flex-direction: column; gap: 6px; }
+    .cmp-hist-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+      border-radius: 10px; background: rgba(255,255,255,.02); border: 1px solid var(--border);
+      cursor: pointer; transition: all .15s; }
+    .cmp-hist-item:hover { background: rgba(6,182,212,.05); border-color: var(--accent-border); }
+    .cmp-hist-grade { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 900; font-size: 18px;
+      width: 38px; text-align: center; flex-shrink: 0; }
+    .cmp-hist-domain { font-family: 'JetBrains Mono', monospace; font-size: 13px; flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cmp-hist-meta { font-size: 11px; color: var(--text-faint); flex-shrink: 0; }
+    .cmp-hist-delta { font-size: 11px; font-weight: 700; flex-shrink: 0; }
+    .cmp-clear { background: none; border: none; color: var(--text-faint); font-size: 11px;
+      cursor: pointer; margin-left: 8px; }
+    .cmp-clear:hover { color: var(--err); }
+
+    /* Monitoring */
+    .mon-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .mon-sub { font-size: 12px; color: var(--text-muted); flex: 1; }
+    .mon-list { display: flex; flex-direction: column; gap: 8px; }
+    .mon-item { padding: 13px 15px; border-radius: 12px; background: rgba(255,255,255,.02);
+      border: 1px solid var(--border); }
+    .mon-row1 { display: flex; align-items: center; gap: 10px; }
+    .mon-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .mon-dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+    .mon-dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+    .mon-dot.err { background: var(--err); box-shadow: 0 0 8px var(--err); }
+    .mon-dot.idle { background: var(--text-faint); }
+    .mon-domain { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600; flex: 1;
+      min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mon-remove { background: none; border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text-faint); cursor: pointer; padding: 4px 9px; font-size: 11px; transition: all .15s; }
+    .mon-remove:hover { color: var(--err); border-color: rgba(239,68,68,.3); }
+    .mon-stats { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
+    .mon-stat { font-size: 11px; padding: 3px 9px; border-radius: 7px; background: rgba(255,255,255,.04);
+      color: var(--text-dim); border: 1px solid var(--border); }
+    .mon-stat b { color: var(--text); font-weight: 600; }
+    .mon-changes { margin-top: 9px; display: flex; flex-direction: column; gap: 5px; }
+    .mon-change { font-size: 11.5px; color: var(--warn); display: flex; align-items: center; gap: 7px;
+      background: rgba(245,158,11,.07); border: 1px solid rgba(245,158,11,.18); border-radius: 7px; padding: 6px 10px; }
+    .mon-change svg { width: 13px; height: 13px; flex-shrink: 0; }
+    .mon-checked { font-size: 10.5px; color: var(--text-faint); margin-top: 8px; }
+    .mon-note { display: flex; align-items: flex-start; gap: 8px; font-size: 11.5px; color: var(--text-muted);
+      margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); line-height: 1.5; }
+    .mon-note svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; color: var(--accent); }
+    .btn-export.watching { background: rgba(16,185,129,.14); border-color: var(--brand-border); color: var(--brand); }
 
     /* ══ MOBILE NAV ══════════════════════════════════════════════ */
     .nav-mobile-btn {
@@ -774,9 +975,39 @@
       .prop-row     { grid-template-columns: 1fr auto; }
       .prop-row .prop-vals { display: none; }
     }
+
+    /* ══ REDUCED MOTION ══════════════════════════════════════════ */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+      }
+      .bg-dots, .orb { animation: none !important; }
+    }
+
+    /* ══ PRINT / PDF EXPORT ══════════════════════════════════════ */
+    @media print {
+      .bg-scene, .nav, .footer, .examples, .hero-badge, .hdr-actions,
+      .toast-stack, .copy-btn, .nav-mobile-btn, #searchHistoryDd { display: none !important; }
+      body { background: #fff !important; color: #111 !important; }
+      .container { max-width: 100% !important; padding: 0 !important; }
+      .card { background: #fff !important; border: 1px solid #ccc !important;
+              box-shadow: none !important; break-inside: avoid; page-break-inside: avoid; }
+      .tabs-wrap .cat-tabs, .tabs-wrap .sub-tabs { display: none !important; }
+      /* Reveal every result pane so the whole report prints, not just the active tab */
+      [id^="pane-"] { display: block !important; animation: none !important;
+                      page-break-inside: avoid; margin-bottom: 16px; }
+      * { color: #1a1a1a !important; text-shadow: none !important; }
+      a { color: #0a6 !important; }
+    }
   </style>
 </head>
 <body>
+
+<!-- ── Toast notifications ───────────────────────────────── -->
+<div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="false"></div>
 
 <!-- ── Background scene ──────────────────────────────────── -->
 <div class="bg-scene">
@@ -851,6 +1082,10 @@
       <button class="example-chip" onclick="quickSearch('google.com')">google.com</button>
       <button class="example-chip" onclick="quickSearch('vercel.com')">vercel.com</button>
     </div>
+    <div class="hero-tools">
+      <button class="hero-tool-btn" onclick="openCompare()"><i data-lucide="git-compare"></i>Compare &amp; History</button>
+      <button class="hero-tool-btn" onclick="openMonitor()"><i data-lucide="radar"></i>Monitoring</button>
+    </div>
   </div>
 
   <!-- ── Results ───────────────────────────────────────────── -->
@@ -879,9 +1114,23 @@
           <div class="score-lbl">Health Score</div>
         </div>
         <div class="grade-num" id="gradeLetter"></div>
-        <button onclick="exportResults()" class="btn-export" title="Export all results as JSON">
-          <i data-lucide="download"></i>Export JSON
-        </button>
+        <div class="hdr-actions">
+          <button onclick="toggleWatch(this)" id="watchBtn" class="btn-export" title="Monitor this domain for changes">
+            <i data-lucide="radar"></i>Watch
+          </button>
+          <button onclick="openCompare()" class="btn-export" title="Compare with another domain / view history">
+            <i data-lucide="git-compare"></i>Compare
+          </button>
+          <button onclick="shareLink(this)" class="btn-export" title="Copy a shareable link to this report">
+            <i data-lucide="link"></i>Share
+          </button>
+          <button onclick="exportPDF()" class="btn-export" title="Export as PDF / print">
+            <i data-lucide="file-text"></i>PDF
+          </button>
+          <button onclick="exportResults()" class="btn-export" title="Export all results as JSON">
+            <i data-lucide="download"></i>JSON
+          </button>
+        </div>
       </div>
     </div>
 
@@ -904,6 +1153,9 @@
         <div class="skel stat-val" id="sBl" style="height:26px;width:68px"></div>
       </div>
     </div>
+
+    <!-- Security Scorecard (executive summary) -->
+    <div id="scorecard" class="card scorecard" style="display:none"></div>
 
     <!-- Tabs -->
     <div class="tabs-wrap">
@@ -1114,6 +1366,40 @@
   </div><!-- /results -->
 </div><!-- /container -->
 
+<!-- ── Compare & History overlay ─────────────────────────── -->
+<div class="cmp-overlay" id="cmpOverlay" role="dialog" aria-modal="true" aria-label="Compare and history">
+  <div class="cmp-panel">
+    <div class="cmp-head">
+      <div class="cmp-title"><i data-lucide="git-compare"></i>Compare &amp; History</div>
+      <button class="cmp-close" aria-label="Close" onclick="closeCompare()"><i data-lucide="x"></i></button>
+    </div>
+    <div class="cmp-selectors">
+      <select class="cmp-select" id="cmpA" onchange="renderCompare()"></select>
+      <span class="cmp-vs">vs</span>
+      <select class="cmp-select" id="cmpB" onchange="renderCompare()"></select>
+    </div>
+    <div id="cmpTable"></div>
+    <div class="cmp-hist-head">Recent scans</div>
+    <div id="cmpHistory" class="cmp-history"></div>
+  </div>
+</div>
+
+<!-- ── Monitoring overlay ────────────────────────────────── -->
+<div class="cmp-overlay" id="monOverlay" role="dialog" aria-modal="true" aria-label="Domain monitoring">
+  <div class="cmp-panel">
+    <div class="cmp-head">
+      <div class="cmp-title"><i data-lucide="radar"></i>Domain Monitoring</div>
+      <button class="cmp-close" aria-label="Close" onclick="closeMonitor()"><i data-lucide="x"></i></button>
+    </div>
+    <div class="mon-toolbar">
+      <span class="mon-sub" id="monSub"></span>
+      <button class="hero-tool-btn" id="monRefresh" onclick="refreshMonitor(false)"><i data-lucide="refresh-cw"></i>Check all now</button>
+    </div>
+    <div id="monList" class="mon-list"></div>
+    <div class="mon-note"><i data-lucide="info"></i>Checks run automatically every 15 minutes while this tab is open, and on demand. Alerts cover certificate expiry, blacklisting, A-record and TLS-grade changes.</div>
+  </div>
+</div>
+
 <!-- ── Footer ────────────────────────────────────────────── -->
 <footer class="footer">
   <div class="footer-wm"><span class="het">HET</span><span class="ops">OPS_</span></div>
@@ -1161,19 +1447,36 @@ function safeCopy(s){
   return escapedBackslashes.split("'").join(String.raw`\'`);
 }
 
+// ── Toast notifications ────────────────────────────────────────
+const TOAST_ICONS = { ok:'check-circle', err:'alert-circle', warn:'alert-triangle', info:'info' };
+function toast(msg, type='info', ms=3200){
+  const stack=$('toastStack'); if(!stack) return;
+  const el=document.createElement('div');
+  el.className='toast '+type;
+  el.innerHTML=`<span class="toast-ico"><i data-lucide="${TOAST_ICONS[type]||'info'}"></i></span><span class="toast-msg">${esc(msg)}</span>`;
+  stack.appendChild(el);
+  if(window.lucide) lucide.createIcons({ root: el });
+  const close=()=>{ if(!el.isConnected) return; el.classList.add('leaving'); setTimeout(()=>el.remove(),280); };
+  if(ms>0) setTimeout(close, ms);
+  el.addEventListener('click', close);
+  return el;
+}
+
 // ── Copy to clipboard ──────────────────────────────────────────
 function cp(txt,btn){
   navigator.clipboard.writeText(txt).then(()=>{
-    const o=btn.textContent; btn.textContent='Copied!'; btn.style.color='var(--brand)';
-    setTimeout(()=>{ btn.textContent=o; btn.style.color=''; },1600);
-  });
+    if(btn){ const o=btn.textContent; btn.textContent='Copied!'; btn.style.color='var(--brand)';
+      setTimeout(()=>{ btn.textContent=o; btn.style.color=''; },1600); }
+    toast('Copied to clipboard','ok',1800);
+  }).catch(()=>toast('Could not copy to clipboard','err'));
 }
 
 // ── Tab switching ──────────────────────────────────────────────
 function tab(name){
-  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>{ b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
   document.querySelectorAll('[id^="pane-"]').forEach(p=>p.style.display='none');
-  $('tab-'+name).classList.add('active');
+  const btn=$('tab-'+name);
+  if(btn){ btn.classList.add('active'); btn.setAttribute('aria-selected','true'); scrollTabIntoView(btn); }
   const pane=$('pane-'+name);
   pane.style.display='';
   pane.style.animation='none';
@@ -1181,12 +1484,26 @@ function tab(name){
   pane.style.animation='';
 }
 
+// Center the active (sub/category) tab within its horizontal strip — scrolls only
+// the strip, never the page, so switching tabs can't cause a vertical jump.
+function scrollTabIntoView(btn){
+  try{
+    const strip=btn.closest('.sub-tabs-wrap, .cat-tabs'); if(!strip) return;
+    const b=btn.getBoundingClientRect(), s=strip.getBoundingClientRect();
+    const delta=(b.left+b.width/2)-(s.left+s.width/2);
+    if(Math.abs(delta)<2) return;
+    const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+    strip.scrollBy({ left: delta, behavior: reduce?'auto':'smooth' });
+  }catch(e){}
+}
+
 // ── Category selection ─────────────────────────────────────────
 const CAT_FIRST = { core:'dns', security:'ssl', email:'emailsec', network:'ipv6', web:'http', intelligence:'ct' };
 function selectCat(name){
-  document.querySelectorAll('.cat-tab').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.cat-tab').forEach(b=>{ b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
   document.querySelectorAll('.sub-tabs-group').forEach(g=>g.style.display='none');
-  $('cat-'+name).classList.add('active');
+  const cb=$('cat-'+name);
+  if(cb){ cb.classList.add('active'); cb.setAttribute('aria-selected','true'); scrollTabIntoView(cb); }
   $('cat-'+name+'-tabs').style.display='flex';
   tab(CAT_FIRST[name]);
 }
@@ -1195,14 +1512,63 @@ function selectCat(name){
 function quickSearch(d){ $('searchInput').value=d; runLookup(); }
 
 // ── Main lookup ────────────────────────────────────────────────
-let isAnalyzing = false;
+let currentRun = null;   // AbortController for the in-flight analysis
+let runToken = 0;        // guards late callbacks from superseded runs
+
+// Promise-based delay that rejects if the run is aborted mid-wait.
+function sleep(ms, signal){
+  return new Promise((resolve, reject) => {
+    if(signal && signal.aborted) return reject(new DOMException('Aborted','AbortError'));
+    const t = setTimeout(resolve, ms);
+    if(signal) signal.addEventListener('abort', () => {
+      clearTimeout(t); reject(new DOMException('Aborted','AbortError'));
+    }, {once:true});
+  });
+}
+
+// POST a JSON request with abort support and automatic 429 back-off/retry.
+async function fetchJSON(url, body, signal, attempt=0){
+  const r = await fetch(url, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body),
+    signal
+  });
+  if(r.status===429 && attempt<4){
+    const retryAfter = parseFloat(r.headers.get('Retry-After'));
+    const wait = retryAfter>0 ? retryAfter*1000 : Math.min(8000, 500*(2**attempt)) + Math.random()*300;
+    await sleep(wait, signal);
+    return fetchJSON(url, body, signal, attempt+1);
+  }
+  return r.json();
+}
+
+// Drain an ordered list of task thunks with bounded concurrency (request waves).
+// Earlier tasks start first, so high-priority panels resolve sooner.
+async function runPool(tasks, concurrency, signal){
+  let i = 0;
+  const workers = Array.from({length: Math.min(concurrency, tasks.length)}, async () => {
+    while(i < tasks.length){
+      if(signal && signal.aborted) return;
+      const task = tasks[i++];
+      try { await task(); } catch(_){ /* per-task errors are handled inside the task */ }
+    }
+  });
+  await Promise.all(workers);
+}
+
 async function runLookup(){
-  if(isAnalyzing) return;
   const raw=$('searchInput').value.trim(); if(!raw) return;
   const domain=norm(raw); if(!domain) return;
 
-  isAnalyzing = true;
+  // A new analysis supersedes any in-flight one — cancel its pending requests.
+  if(currentRun) currentRun.abort();
+  currentRun = new AbortController();
+  const signal = currentRun.signal;
+  const myToken = ++runToken;
+
   saveHistory(domain);
+  syncURL(domain);
   hideHistoryDropdown();
   const analyzeBtn = document.querySelector('.btn-analyze');
   if(analyzeBtn){ analyzeBtn.disabled = true; analyzeBtn.textContent = 'Analyzing…'; }
@@ -1211,7 +1577,7 @@ async function runLookup(){
   $('results').style.display='';
   $('currentDomain').textContent=domain;
   $('domainChips').innerHTML='';
-  $('scoreNum').textContent='—';
+  $('scoreNum').textContent='—'; scoreTarget=null;
   $('scoreArc').style.strokeDashoffset='232.5';
   $('gradeLetter').textContent='';
 
@@ -1249,68 +1615,77 @@ async function runLookup(){
   $('dnssecChainContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Validating DNSSEC chain of trust…</div></div>';
 
   Object.keys(S).forEach(k=>S[k]=null);
+  const sc=$('scorecard'); if(sc){ sc.style.display='none'; sc.innerHTML=''; }
   selectCat('core');
-  go(domain);
+  await go(domain, signal, myToken);
 }
 
-async function go(domain){
-  await Promise.allSettled([
-    fetch('/api/dns-lookup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain,resolver:'balanced'})})
-      .then(r=>r.json()).then(d=>{ S.dns=d; renderDns(d); setStat('sDns',d?.summary?.totalRecords??d?.totals?.records??0,''); renderSec(); score(); updateTabHealth(); }),
-    fetch('/api/whois',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.whois=d; renderWhois(d); }),
-    fetch('/api/ssl',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.ssl=d; renderSsl(d); sslStat(d); score(); updateTabHealth(); }),
-    fetch('/api/security-headers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.headers=d; renderHeaders(d); }),
-    fetch('/api/dnssec',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.dnssec=d; renderDnssec(d); }),
-    fetch('/api/blacklist-check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.bl=d; blStat(d); renderSec(); score(); }),
-    fetch('/api/propagation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain,type:'A'})})
-      .then(r=>r.json()).then(d=>{ S.prop=d; renderProp(d); }),
-    fetch('/api/mx-smtp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.mx=d; renderMx(d); }),
-    fetch('/api/trace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.trace=d; renderTrace(d); }),
-    fetch('/api/tech',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.tech=d; renderTech(d); }),
-    fetch('/api/http',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.http=d; renderHttp(d); updateTabHealth(); }),
-    fetch('/api/redirect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.redirect=d; renderRedirect(d); }),
-    fetch('/api/cors',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.cors=d; renderCors(d); }),
-    fetch('/api/robots',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.robots=d; renderRobots(d); }),
-    fetch('/api/cert-transparency',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.ct=d; renderCt(d); }),
-    fetch('/api/geoip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.geoip=d; renderGeo(d); score(); }),
-    fetch('/api/port-scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.ports=d; renderPorts(d); }),
-    fetch('/api/ocsp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.ocsp=d; renderOcsp(d); }),
-    fetch('/api/mta-sts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.mtasts=d; renderMtasts(d); }),
-    fetch('/api/email-security',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.emailsec=d; renderEmailSec(d); emailSecStat(d); score(); updateTabHealth(); }),
-    fetch('/api/subdomain-takeover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.takeover=d; renderTakeover(d); }),
-    fetch('/api/hsts-preload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.hsts=d; renderHsts(d); }),
-    fetch('/api/csp-analyzer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.csp=d; renderCsp(d); }),
-    fetch('/api/typosquat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.typosquat=d; renderTyposquat(d); updateTabHealth(); }),
-    fetch('/api/ipv6',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.ipv6=d; renderIpv6(d); updateTabHealth(); }),
-    fetch('/api/dnssec-chain',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})})
-      .then(r=>r.json()).then(d=>{ S.dnssecChain=d; renderDnssecChain(d); }),
-  ]);
-  isAnalyzing = false;
+async function go(domain, signal, myToken){
+  // Build a task per endpoint. Each fetches, then renders — failures degrade to
+  // an error panel instead of an endless spinner, and a render throw is logged
+  // rather than killing the whole run. Ordered by priority: headline stats and
+  // the default-visible (core) panels resolve first.
+  let failed = 0;
+  const mk = (url, body, handler) => async () => {
+    let d;
+    try {
+      d = await fetchJSON(url, body, signal);
+    } catch(e){
+      if(e && e.name==='AbortError') return;       // superseded by a newer run
+      d = { error: 'Request failed — please retry.' };
+    }
+    if(myToken !== runToken) return;                // a newer analysis took over
+    if(d && d.error) failed++;
+    try { handler(d); } catch(err){ console.error('render error:', url, err); }
+  };
+
+  const tasks = [
+    mk('/api/dns-lookup',{domain,resolver:'balanced'},d=>{ S.dns=d; renderDns(d); setStat('sDns',d?.summary?.totalRecords??d?.totals?.records??0,''); renderSec(); score(); updateTabHealth(); }),
+    mk('/api/ssl',{domain},d=>{ S.ssl=d; renderSsl(d); sslStat(d); score(); updateTabHealth(); }),
+    mk('/api/blacklist-check',{domain},d=>{ S.bl=d; blStat(d); renderSec(); score(); }),
+    mk('/api/email-security',{domain},d=>{ S.emailsec=d; renderEmailSec(d); emailSecStat(d); score(); updateTabHealth(); }),
+    mk('/api/whois',{domain},d=>{ S.whois=d; renderWhois(d); }),
+    mk('/api/security-headers',{domain},d=>{ S.headers=d; renderHeaders(d); }),
+    mk('/api/dnssec',{domain},d=>{ S.dnssec=d; renderDnssec(d); }),
+    mk('/api/propagation',{domain,type:'A'},d=>{ S.prop=d; renderProp(d); }),
+    mk('/api/mx-smtp',{domain},d=>{ S.mx=d; renderMx(d); }),
+    mk('/api/trace',{domain},d=>{ S.trace=d; renderTrace(d); }),
+    mk('/api/tech',{domain},d=>{ S.tech=d; renderTech(d); }),
+    mk('/api/http',{domain},d=>{ S.http=d; renderHttp(d); updateTabHealth(); }),
+    mk('/api/redirect',{domain},d=>{ S.redirect=d; renderRedirect(d); }),
+    mk('/api/cors',{domain},d=>{ S.cors=d; renderCors(d); }),
+    mk('/api/robots',{domain},d=>{ S.robots=d; renderRobots(d); }),
+    mk('/api/cert-transparency',{domain},d=>{ S.ct=d; renderCt(d); }),
+    mk('/api/geoip',{domain},d=>{ S.geoip=d; renderGeo(d); score(); }),
+    mk('/api/port-scan',{domain},d=>{ S.ports=d; renderPorts(d); }),
+    mk('/api/ocsp',{domain},d=>{ S.ocsp=d; renderOcsp(d); }),
+    mk('/api/mta-sts',{domain},d=>{ S.mtasts=d; renderMtasts(d); }),
+    mk('/api/subdomain-takeover',{domain},d=>{ S.takeover=d; renderTakeover(d); }),
+    mk('/api/hsts-preload',{domain},d=>{ S.hsts=d; renderHsts(d); }),
+    mk('/api/csp-analyzer',{domain},d=>{ S.csp=d; renderCsp(d); }),
+    mk('/api/typosquat',{domain},d=>{ S.typosquat=d; renderTyposquat(d); updateTabHealth(); }),
+    mk('/api/ipv6',{domain},d=>{ S.ipv6=d; renderIpv6(d); updateTabHealth(); }),
+    mk('/api/dnssec-chain',{domain},d=>{ S.dnssecChain=d; renderDnssecChain(d); }),
+  ];
+
+  // 6 concurrent requests keeps the UI responsive and stays well under server limits.
+  await runPool(tasks, 6, signal);
+
+  if(signal.aborted || myToken !== runToken) return;  // a newer run owns the UI now
   const analyzeBtn = document.querySelector('.btn-analyze');
   if(analyzeBtn){ analyzeBtn.disabled = false; analyzeBtn.textContent = 'Analyze →'; }
+
+  renderScorecard();
+  syncWatchBtn();
+  const prevSnap = saveSnapshot(domain);
+
+  if(failed === 0) toast(`Analysis complete for ${domain}`, 'ok');
+  else if(failed >= tasks.length) toast(`Analysis failed — could not reach ${domain}`, 'err');
+  else toast(`Analysis complete · ${failed} check${failed!==1?'s':''} unavailable`, 'warn');
+  notifyGradeChange(prevSnap, domain);
+
+  // Honour a ?tab= deep-link once the report is populated.
+  if(window.__pendingTab){ deepLinkTab(window.__pendingTab); window.__pendingTab=null; }
 }
 
 // ── Render: DNS (masonry layout) ────────────────────────────────
@@ -1824,30 +2199,56 @@ function blStat(d){
 }
 
 // ── Score ──────────────────────────────────────────────────────
-function score(){
+// Pure computation of the weighted health score, shared by the score ring and
+// the scorecard. Returns null until at least one weighted check has data.
+function computeHealth(){
   let pts=0, tot=0;
   if(S.dns?.insights){
     const c=S.dns.insights.checks;
     pts+=(c.spf?15:0)+(c.dmarc?15:0)+(c.caa?10:0)+(c.mx?10:0); tot+=50;
   }
+  if(S.emailsec&&!S.emailsec.error){ pts+=Math.round((S.emailsec.overallScore||0)*0.2); tot+=20; }
+  if(S.ssl&&!S.ssl.error){ const d=S.ssl.certificate?.daysRemaining; pts+=d>90?30:d>30?20:d>0?10:0; tot+=30; }
+  if(S.bl?.results){ pts+=S.bl.results.some(r=>r.listed)?0:10; tot+=10; }
+  if(!tot) return null;
+  const pct=Math.round(pts/tot*100);
+  const grade=pct>=95?'A+':pct>=85?'A':pct>=70?'B':pct>=50?'C':'D';
+  const gc=pct>=85?'var(--ok)':pct>=70?'#a3e635':pct>=50?'var(--warn)':'var(--err)';
+  return {pct, grade, gc};
+}
+
+// Count the score ring's number up to its target, synced with the arc animation.
+let scoreRAF=null, scoreTarget=null;
+function animateScore(to){
+  const el=$('scoreNum'); if(!el) return;
+  if(scoreTarget===to) return;
+  scoreTarget=to;
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches){ el.textContent=to; return; }
+  if(scoreRAF) cancelAnimationFrame(scoreRAF);
+  const from=parseInt(el.textContent,10)||0, dur=900, start=performance.now();
+  (function frame(t){
+    const p=Math.min(1,(t-start)/dur), eased=1-Math.pow(1-p,3);
+    el.textContent=Math.round(from+(to-from)*eased);
+    scoreRAF = p<1 ? requestAnimationFrame(frame) : null;
+  })(performance.now());
+}
+
+function score(){
+  // Email-security stat tile (kept here as it has its own fallback display logic).
   if(S.emailsec&&!S.emailsec.error){
     const es=S.emailsec.overallScore||0;
-    pts+=Math.round(es*0.2); tot+=20;
     setStat('sEmail',es+'%',es>=80?'ok':es>=50?'warn':'err');
   } else if(S.dns?.insights){
     const c=S.dns.insights.checks;
     const es=(c.spf?1:0)+(c.dmarc?1:0)+(c.mx?1:0);
     setStat('sEmail',es===3?'Strong':es>=2?'Fair':'Weak',es===3?'ok':es>=2?'warn':'err');
   }
-  if(S.ssl&&!S.ssl.error){ const d=S.ssl.certificate?.daysRemaining; pts+=d>90?30:d>30?20:d>0?10:0; tot+=30; }
-  if(S.bl?.results){ pts+=S.bl.results.some(r=>r.listed)?0:10; tot+=10; }
-  if(!tot) return;
-  const pct=Math.round(pts/tot*100);
-  const grade=pct>=95?'A+':pct>=85?'A':pct>=70?'B':pct>=50?'C':'D';
-  const gc=pct>=85?'var(--ok)':pct>=70?'#a3e635':pct>=50?'var(--warn)':'var(--err)';
+  const h=computeHealth();
+  if(!h) return;
+  const {pct, grade, gc}=h;
   $('scoreArc').style.strokeDashoffset=232.5-(232.5*pct/100);
   $('scoreArc').style.stroke=gc;
-  $('scoreNum').textContent=pct;
+  animateScore(pct);
   $('gradeLetter').textContent=grade;
   $('gradeLetter').style.color=gc;
   $('gradeLetter').style.textShadow=`0 0 40px ${gc}77`;
@@ -1858,6 +2259,457 @@ function score(){
   if(S.geoip?.geo?.org) chips.push(`<span class="pill">${esc(S.geoip.geo.org)}</span>`);
   $('domainChips').innerHTML=chips.join('');
 }
+
+// ── Security Scorecard ─────────────────────────────────────────
+// Aggregate the most important signals across all checks into prioritized,
+// actionable findings. Each finding is defensive — only emitted when its source
+// data is present and not an error, so partial results never break the summary.
+const SEV_RANK = { crit:0, high:1, med:2, low:3, good:4 };
+function collectFindings(){
+  const f=[];
+  const add=(sev,title,detail,tab)=>f.push({sev,title,detail,tab});
+
+  // ── SSL / TLS ──
+  if(S.ssl && !S.ssl.error){
+    const cert=S.ssl.certificate||{};
+    const days=cert.daysRemaining;
+    if(cert.expired || days<0) add('crit','SSL certificate has expired','Browsers will block the site until the certificate is renewed.','ssl');
+    else if(days!=null && days<15) add('crit',`Certificate expires in ${days} day${days!==1?'s':''}`,'Renew immediately to avoid an outage.','ssl');
+    else if(days!=null && days<30) add('high',`Certificate expires in ${days} days`,'Schedule renewal soon.','ssl');
+    if(cert.sha1Signed) add('high','Certificate signed with SHA-1','SHA-1 is deprecated and considered insecure — reissue with SHA-256.','ssl');
+    const prot=S.ssl.protocols||{};
+    if(prot.sslv3) add('crit','SSL 3.0 is enabled','Obsolete and vulnerable (POODLE) — disable it.','ssl');
+    if(prot.tls10 || prot.tls11) add('med',`Legacy TLS ${prot.tls10?'1.0':'1.1'} enabled`,'Disable TLS 1.0/1.1; require TLS 1.2 or higher.','ssl');
+    if(!prot.tls13 && prot.tls12!=null) add('low','TLS 1.3 not supported','Enable TLS 1.3 for better performance and security.','ssl');
+    const vuln=S.ssl.vulnerabilities||{};
+    Object.entries(vuln).filter(([,v])=>v&&v.vulnerable).forEach(([k,v])=>
+      add('high',`TLS vulnerable to ${k}`, v.details||'Known TLS weakness detected.','ssl'));
+    const letter=S.ssl.grade?.letter;
+    if((letter==='A+'||letter==='A') && days>30 && !cert.sha1Signed)
+      add('good',`Strong TLS configuration (grade ${letter})`,`Valid certificate, ${days} days remaining.`,'ssl');
+  }
+
+  // ── Email authentication ──
+  if(S.emailsec && !S.emailsec.error){
+    const spf=S.emailsec.spf||{}, dmarc=S.emailsec.dmarc||{}, dkim=S.emailsec.dkim||{};
+    if(!spf.present) add('high','No SPF record','Without SPF, attackers can more easily spoof your domain in email.','emailsec');
+    if(!dmarc.present) add('high','No DMARC record','DMARC tells receivers how to handle spoofed mail — publish a policy.','emailsec');
+    else if(dmarc.policy==='none') add('med','DMARC policy is "none"','Move to quarantine or reject to actually block spoofed mail.','emailsec');
+    else if(dmarc.pct!=null && dmarc.pct<100) add('low',`DMARC applies to only ${dmarc.pct}% of mail`,'Raise pct to 100 once confident.','emailsec');
+    if(!dkim.present) add('med','No DKIM signature detected','DKIM lets receivers verify message integrity.','emailsec');
+    if(spf.present && dmarc.present && (dmarc.policy==='reject'||dmarc.policy==='quarantine') && dkim.present)
+      add('good','Email authentication fully configured','SPF, DKIM and an enforcing DMARC policy are all in place.','emailsec');
+  } else if(S.dns?.insights?.checks){
+    const c=S.dns.insights.checks;
+    if(!c.spf) add('high','No SPF record','Publish an SPF record to reduce email spoofing.','dns');
+    if(!c.dmarc) add('high','No DMARC record','Publish a DMARC policy to control spoofed mail.','dns');
+  }
+
+  // ── Blacklist ──
+  if(S.bl?.results){
+    const listed=S.bl.results.filter(r=>r.listed);
+    if(listed.length) add('crit',`Listed on ${listed.length} blacklist${listed.length!==1?'s':''}`,'Being blacklisted harms email deliverability and reputation — request delisting.','core');
+    else add('good','Not on any monitored blacklist','Clean reputation across checked DNSBLs.','core');
+  }
+
+  // ── DNSSEC ──
+  if(S.dnssec && !S.dnssec.error){
+    if(S.dnssec.rating==='not_configured') add('med','DNSSEC not enabled','DNSSEC protects against DNS spoofing and cache poisoning.','dnssec');
+    else if(S.dnssec.rating==='incomplete') add('low','DNSSEC signed but chain incomplete','DNSKEY present but no DS record at the parent — complete the chain of trust.','dnssec');
+    else if(S.dnssec.rating==='good') add('good','DNSSEC properly configured','Full chain of trust validated.','dnssec');
+  }
+
+  // ── Subdomain takeover ──
+  if(S.takeover?.vulnerabilities?.length)
+    add('crit',`${S.takeover.vulnerabilities.length} possible subdomain takeover${S.takeover.vulnerabilities.length!==1?'s':''}`,'Dangling CNAMEs point to unclaimed services — remove or reclaim them.','takeover');
+
+  // ── Risky open ports ──
+  if(S.ports?.ports){
+    const RISKY={21:'FTP',23:'Telnet',3306:'MySQL',5432:'PostgreSQL',3389:'RDP'};
+    const exposed=S.ports.ports.filter(p=>p.open && RISKY[p.port]).map(p=>`${RISKY[p.port]} (${p.port})`);
+    if(exposed.length) add('med',`Sensitive service${exposed.length!==1?'s':''} exposed`,`Publicly reachable: ${exposed.join(', ')}. Restrict with a firewall.`,'ports');
+  }
+
+  // ── Security headers / HSTS ──
+  if(S.headers && !S.headers.error && S.headers.score!=null && S.headers.score<50)
+    add('med','Weak security headers',`Header score ${S.headers.score}/100 — add HSTS, CSP, X-Content-Type-Options, etc.`,'headers');
+  if(S.hsts && !S.hsts.error && S.hsts.preloaded===false && S.hsts.eligible)
+    add('low','Not on the HSTS preload list','Eligible for preload — submit to harden against SSL-stripping.','hsts');
+
+  // ── Typosquatting ──
+  if(S.typosquat?.results){
+    const reg=S.typosquat.results.filter(r=>r.registered).length;
+    if(reg>0) add('low',`${reg} look-alike domain${reg!==1?'s':''} registered`,'Potential typosquats are registered — monitor for phishing/brand abuse.','typosquat');
+  }
+
+  f.sort((a,b)=>SEV_RANK[a.sev]-SEV_RANK[b.sev]);
+  return f;
+}
+
+const SEV_LABEL = { crit:'Critical', high:'High', med:'Medium', low:'Low', good:'Pass' };
+function renderScorecard(){
+  const el=$('scorecard'); if(!el) return;
+  const findings=collectFindings();
+  if(!findings.length){ el.style.display='none'; return; }
+  const h=computeHealth();
+  const counts={crit:0,high:0,med:0,low:0,good:0};
+  findings.forEach(x=>counts[x.sev]++);
+
+  const countPill=(sev,cls,label)=>counts[sev]
+    ? `<span class="sc-count ${cls}"><span class="dot"></span>${counts[sev]} ${label}</span>` : '';
+
+  const items=findings.map(x=>{
+    const sevCls=x.sev;
+    return `<div class="sc-item ${sevCls}">
+      <span class="sc-sev ${sevCls}">${SEV_LABEL[x.sev]}</span>
+      <div class="sc-body">
+        <div class="sc-item-title">${esc(x.title)}</div>
+        <div class="sc-item-detail">${esc(x.detail)}</div>
+      </div>
+      ${x.tab?`<button class="sc-view" onclick="deepLinkTab('${esc(x.tab)}')">View →</button>`:''}
+    </div>`;
+  }).join('');
+
+  const gradeTxt=h?`${h.grade} · ${h.pct}/100`:'—';
+  el.innerHTML=`
+    <div class="sc-head">
+      <div class="sc-title"><i data-lucide="clipboard-check"></i>Security Scorecard</div>
+      <div class="sc-counts">
+        ${countPill('crit','crit','Critical')}
+        ${countPill('high','high','High')}
+        ${countPill('med','med','Medium')}
+        ${countPill('low','low','Low')}
+        ${countPill('good','good','Passed')}
+      </div>
+    </div>
+    <div class="sc-list">${items}</div>
+    <div class="sc-badge-row">
+      <span class="sc-badge-lbl">Grade: <strong style="color:${h?h.gc:'var(--text)'}">${gradeTxt}</strong></span>
+      <button class="sc-view" onclick="copyBadge()" title="Copy a Markdown status badge for your README">Copy badge</button>
+      <button class="sc-view" onclick="shareLink()">Copy report link</button>
+    </div>`;
+  el.style.display='';
+  if(window.lucide) lucide.createIcons({ root: el });
+}
+
+// Copy a Markdown badge (shields-style) that links back to the live report.
+function copyBadge(){
+  const domain=$('currentDomain').textContent||'';
+  if(!domain){ toast('Run an analysis first','warn'); return; }
+  const h=computeHealth();
+  const grade=h?h.grade:'?';
+  const color=h?(h.pct>=85?'brightgreen':h.pct>=70?'yellowgreen':h.pct>=50?'orange':'red'):'lightgrey';
+  const origin=window.location.origin;
+  const badge=`https://img.shields.io/badge/HetOps_DNS-${encodeURIComponent(grade)}-${color}`;
+  const link=`${origin}/?domain=${encodeURIComponent(domain)}`;
+  const md=`[![HetOps DNS](${badge})](${link})`;
+  navigator.clipboard.writeText(md)
+    .then(()=>toast('Markdown badge copied to clipboard','ok'))
+    .catch(()=>toast('Could not copy badge','err'));
+}
+
+// ── Scan snapshots, history & comparison ───────────────────────
+const SNAP_KEY='hetops_dns_snaps';
+function getSnaps(){ try{ return JSON.parse(localStorage.getItem(SNAP_KEY)||'[]'); }catch(e){ return []; } }
+function buildSnapshot(domain){
+  const h=computeHealth();
+  const sev={crit:0,high:0,med:0,low:0};
+  collectFindings().forEach(x=>{ if(sev[x.sev]!=null) sev[x.sev]++; });
+  const ok=v=>v&&!v.error;
+  return {
+    domain, ts: Date.now(),
+    pct: h?h.pct:null, grade: h?h.grade:null,
+    sslGrade: ok(S.ssl)?(S.ssl.grade?.letter||null):null,
+    sslDays: ok(S.ssl)?(S.ssl.certificate?.daysRemaining??null):null,
+    emailScore: ok(S.emailsec)?(S.emailsec.overallScore??null):null,
+    dmarc: ok(S.emailsec)?(S.emailsec.dmarc?.policy||(S.emailsec.dmarc?.present?'set':'none')):null,
+    dnssec: ok(S.dnssec)?(S.dnssec.rating||null):null,
+    blacklisted: S.bl?.results? S.bl.results.some(r=>r.listed):null,
+    dnsRecords: S.dns?.summary?.totalRecords ?? S.dns?.totals?.records ?? null,
+    ip: S.geoip?.target||null,
+    country: S.geoip?.geo?.country_name||null,
+    crit: sev.crit, high: sev.high, med: sev.med, low: sev.low,
+  };
+}
+// Persist a snapshot for the just-finished scan. Returns the previous snapshot for
+// the same domain (if any) so callers can surface what changed since last time.
+function saveSnapshot(domain){
+  const snap=buildSnapshot(domain);
+  if(snap.pct==null && snap.sslGrade==null && snap.dnsRecords==null) return null; // no real data
+  const snaps=getSnaps();
+  const prev=snaps.find(s=>s.domain===domain) || null;
+  const next=[snap, ...snaps].slice(0,40);
+  try{ localStorage.setItem(SNAP_KEY, JSON.stringify(next)); }catch(e){}
+  return prev;
+}
+function notifyGradeChange(prev, domain){
+  if(!prev) return;
+  const h=computeHealth(); if(!h) return;
+  if(prev.grade && prev.grade!==h.grade){
+    const better = (prev.pct??0) < h.pct;
+    toast(`${domain}: grade ${better?'improved':'dropped'} ${prev.grade} → ${h.grade} since last scan`, better?'ok':'warn', 4500);
+  } else if(prev.sslDays!=null && h && S.ssl && !S.ssl.error){
+    const now=S.ssl.certificate?.daysRemaining;
+    if(now!=null && prev.sslDays>30 && now<=30) toast(`${domain}: certificate now expires in ${now} days`, 'warn', 4500);
+  }
+}
+function latestPerDomain(){
+  const seen=new Set(), out=[];
+  for(const s of getSnaps()){ if(!seen.has(s.domain)){ seen.add(s.domain); out.push(s); } }
+  return out;
+}
+function relTime(ts){
+  const s=Math.floor((Date.now()-ts)/1000);
+  if(s<60) return 'just now';
+  if(s<3600) return Math.floor(s/60)+'m ago';
+  if(s<86400) return Math.floor(s/3600)+'h ago';
+  return Math.floor(s/86400)+'d ago';
+}
+
+function openCompare(){
+  const ov=$('cmpOverlay');
+  const domains=latestPerDomain();
+  const a=$('cmpA'), b=$('cmpB');
+  const opts=domains.map(s=>`<option value="${esc(s.domain)}">${esc(s.domain)}</option>`).join('');
+  a.innerHTML=opts; b.innerHTML=opts;
+  // Default A = current domain (or newest), B = next distinct domain.
+  const current=$('currentDomain').textContent||'';
+  if(domains.length){
+    a.value = domains.some(s=>s.domain===current)?current:domains[0].domain;
+    const other=domains.find(s=>s.domain!==a.value);
+    if(other) b.value=other.domain;
+  }
+  renderCompare();
+  renderHistory();
+  ov.classList.add('open');
+  if(window.lucide) lucide.createIcons({ root: ov });
+}
+function closeCompare(){ $('cmpOverlay').classList.remove('open'); }
+
+const CMP_METRICS=[
+  ['Health score','pct',(v)=>v==null?'—':v+'/100','higher'],
+  ['Grade','grade',(v)=>v||'—','none'],
+  ['Critical issues','crit',(v)=>v==null?'—':String(v),'lower'],
+  ['High issues','high',(v)=>v==null?'—':String(v),'lower'],
+  ['TLS grade','sslGrade',(v)=>v||'—','none'],
+  ['Cert days left','sslDays',(v)=>v==null?'—':v+'d','higher'],
+  ['Email score','emailScore',(v)=>v==null?'—':v+'/100','higher'],
+  ['DMARC policy','dmarc',(v)=>v||'—','none'],
+  ['DNSSEC','dnssec',(v)=>v?({good:'enabled',incomplete:'partial',not_configured:'off'}[v]||v):'—','none'],
+  ['Blacklisted','blacklisted',(v)=>v==null?'—':(v?'yes':'no'),'none'],
+  ['DNS records','dnsRecords',(v)=>v==null?'—':String(v),'higher'],
+  ['Location','country',(v)=>v||'—','none'],
+];
+function renderCompare(){
+  const snaps=latestPerDomain();
+  const A=snaps.find(s=>s.domain===$('cmpA').value);
+  const B=snaps.find(s=>s.domain===$('cmpB').value);
+  const wrap=$('cmpTable');
+  if(!A || !B){ wrap.innerHTML=`<div class="cmp-empty">Run at least two domains to compare them side by side.</div>`; return; }
+  const rows=CMP_METRICS.map(([label,key,fmt,better])=>{
+    const va=A[key], vb=B[key];
+    let ca='val', cb='val';
+    if(better!=='none' && typeof va==='number' && typeof vb==='number' && va!==vb){
+      const aWins = better==='higher' ? va>vb : va<vb;
+      ca='val '+(aWins?'winner':'loser'); cb='val '+(aWins?'loser':'winner');
+    }
+    return `<tr><td class="metric">${esc(label)}</td><td class="${ca}">${esc(fmt(va))}</td><td class="${cb}">${esc(fmt(vb))}</td></tr>`;
+  }).join('');
+  wrap.innerHTML=`<table class="cmp-grid">
+    <thead><tr><th>Metric</th><th>${esc(A.domain)}</th><th>${esc(B.domain)}</th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+}
+function gradeColor(g){
+  if(!g) return 'var(--text-muted)';
+  if(g==='A+'||g==='A') return 'var(--ok)';
+  if(g==='B') return '#a3e635';
+  if(g==='C') return 'var(--warn)';
+  return 'var(--err)';
+}
+function renderHistory(){
+  const all=getSnaps();
+  const wrap=$('cmpHistory');
+  if(!all.length){ wrap.innerHTML=`<div class="cmp-empty">No scans yet — analyze a domain to start building history.</div>`; return; }
+  // Compute per-domain previous to show deltas.
+  const html=all.map((s,i)=>{
+    const prev=all.slice(i+1).find(p=>p.domain===s.domain);
+    let delta='';
+    if(prev && prev.pct!=null && s.pct!=null && prev.pct!==s.pct){
+      const up=s.pct>prev.pct;
+      delta=`<span class="cmp-hist-delta" style="color:${up?'var(--ok)':'var(--err)'}">${up?'▲':'▼'}${Math.abs(s.pct-prev.pct)}</span>`;
+    }
+    return `<div class="cmp-hist-item" onclick="closeCompare();quickSearch('${esc(s.domain)}')">
+      <span class="cmp-hist-grade" style="color:${gradeColor(s.grade)}">${esc(s.grade||'—')}</span>
+      <span class="cmp-hist-domain">${esc(s.domain)}</span>
+      ${delta}
+      <span class="cmp-hist-meta">${s.pct!=null?s.pct+'/100 · ':''}${relTime(s.ts)}</span>
+    </div>`;
+  }).join('');
+  wrap.innerHTML=`${html}<div style="text-align:right;margin-top:8px"><button class="cmp-clear" onclick="clearSnaps()">Clear history</button></div>`;
+}
+function clearSnaps(){
+  try{ localStorage.removeItem(SNAP_KEY); }catch(e){}
+  renderHistory(); renderCompare();
+  toast('Scan history cleared','info',2000);
+}
+
+// ── Domain monitoring & alerts ─────────────────────────────────
+const WATCH_KEY='hetops_dns_watch';
+function getWatch(){ try{ return JSON.parse(localStorage.getItem(WATCH_KEY)||'[]'); }catch(e){ return []; } }
+function setWatch(w){ try{ localStorage.setItem(WATCH_KEY, JSON.stringify(w)); }catch(e){} }
+function isWatched(domain){ return getWatch().some(w=>w.domain===domain); }
+
+// Snapshot of the monitored signals from the current in-page analysis.
+function currentStatusFromS(){
+  const ok=v=>v&&!v.error;
+  return {
+    ts: Date.now(),
+    sslDays: ok(S.ssl)?(S.ssl.certificate?.daysRemaining??null):null,
+    grade: ok(S.ssl)?(S.ssl.grade?.letter||null):null,
+    blacklisted: S.bl?.results? S.bl.results.some(r=>r.listed):null,
+    aRecords: ok(S.dns)?(((S.dns.results?.A)||[]).map(r=>r.value).sort()):[],
+  };
+}
+
+function toggleWatch(btn){
+  const domain=$('currentDomain').textContent||'';
+  if(!domain){ toast('Run an analysis first','warn'); return; }
+  let w=getWatch();
+  if(isWatched(domain)){
+    w=w.filter(x=>x.domain!==domain); setWatch(w);
+    syncWatchBtn();
+    toast(`Stopped monitoring ${domain}`,'info',2200);
+  } else {
+    const base=currentStatusFromS();
+    w=[{domain, addedAt:Date.now(), baseline:base, last:base, lastChanges:[]}, ...w].slice(0,30);
+    setWatch(w);
+    syncWatchBtn();
+    toast(`Now monitoring ${domain} for changes`,'ok');
+  }
+}
+function syncWatchBtn(){
+  const btn=$('watchBtn'); if(!btn) return;
+  const domain=$('currentDomain').textContent||'';
+  const on=domain && isWatched(domain);
+  btn.classList.toggle('watching', !!on);
+  btn.innerHTML=`<i data-lucide="radar"></i>${on?'Watching':'Watch'}`;
+  if(window.lucide) lucide.createIcons({ root: btn });
+}
+
+// Fetch only the monitored signals for a domain (cached server-side, so cheap).
+async function monCheck(domain){
+  const [ssl,bl,dns]=await Promise.all([
+    fetchJSON('/api/ssl',{domain}).catch(()=>({error:1})),
+    fetchJSON('/api/blacklist-check',{domain}).catch(()=>({error:1})),
+    fetchJSON('/api/dns-lookup',{domain,resolver:'balanced'}).catch(()=>({error:1})),
+  ]);
+  return {
+    ts: Date.now(),
+    sslDays: (ssl&&!ssl.error)?(ssl.certificate?.daysRemaining??null):null,
+    grade: (ssl&&!ssl.error)?(ssl.grade?.letter||null):null,
+    blacklisted: (bl&&!bl.error&&bl.results)?bl.results.some(r=>r.listed):null,
+    aRecords: (dns&&!dns.error)?(((dns.results?.A)||[]).map(r=>r.value).sort()):[],
+  };
+}
+
+// Compare two status snapshots and describe meaningful changes.
+function diffStatus(prev, cur){
+  const ch=[];
+  if(!prev) return ch;
+  if(prev.sslDays!=null && cur.sslDays!=null){
+    for(const t of [7,30,90]) if(prev.sslDays>t && cur.sslDays<=t) ch.push(`Certificate now within ${t} days of expiry (${cur.sslDays}d left)`);
+    if(prev.sslDays>0 && cur.sslDays<=0) ch.push('Certificate has expired');
+  }
+  if(prev.blacklisted===false && cur.blacklisted===true) ch.push('Domain is now blacklisted');
+  if(prev.blacklisted===true && cur.blacklisted===false) ch.push('Domain removed from blacklists');
+  if(prev.aRecords && cur.aRecords){
+    const a=prev.aRecords.join(', '), b=cur.aRecords.join(', ');
+    if(a!==b && (a||b)) ch.push(`A record changed: ${a||'∅'} → ${b||'∅'}`);
+  }
+  if(prev.grade && cur.grade && prev.grade!==cur.grade) ch.push(`TLS grade changed ${prev.grade} → ${cur.grade}`);
+  return ch;
+}
+
+let monPolling=false;
+async function refreshMonitor(silent){
+  const watch=getWatch();
+  if(!watch.length){ renderMonitor(); return; }
+  if(monPolling) return; monPolling=true;
+  const btn=$('monRefresh'); if(btn){ btn.disabled=true; }
+  let totalChanges=0;
+  for(const w of watch){
+    try{
+      const cur=await monCheck(w.domain);
+      const prev=w.last||w.baseline;
+      const changes=diffStatus(prev, cur);
+      w.last=cur; w.lastChanges=changes;
+      if(changes.length){
+        totalChanges+=changes.length;
+        toast(`${w.domain}: ${changes[0]}${changes.length>1?` (+${changes.length-1} more)`:''}`,'warn',6500);
+      }
+    }catch(e){ /* leave previous status in place */ }
+  }
+  setWatch(watch);
+  renderMonitor();
+  if(btn){ btn.disabled=false; }
+  monPolling=false;
+  if(!silent) toast(totalChanges?`${totalChanges} change${totalChanges!==1?'s':''} detected`:'All monitored domains unchanged','ok',2600);
+}
+
+function monStatusLevel(s){
+  if(!s) return 'idle';
+  if(s.blacklisted===true || (s.sslDays!=null && s.sslDays<=7)) return 'err';
+  if(s.sslDays!=null && s.sslDays<=30) return 'warn';
+  return 'ok';
+}
+function renderMonitor(){
+  const watch=getWatch();
+  const list=$('monList'), sub=$('monSub');
+  if(sub) sub.textContent = watch.length ? `${watch.length} domain${watch.length!==1?'s':''} monitored` : '';
+  if(!list) return;
+  if(!watch.length){
+    list.innerHTML=`<div class="cmp-empty">No domains monitored yet. Analyze a domain and press <b>Watch</b> to track it for certificate expiry, blacklisting and DNS changes.</div>`;
+    return;
+  }
+  list.innerHTML=watch.map(w=>{
+    const s=w.last;
+    const lvl=monStatusLevel(s);
+    const stats=[];
+    if(s){
+      if(s.sslDays!=null) stats.push(`<span class="mon-stat">Cert <b>${s.sslDays}d</b></span>`);
+      if(s.grade) stats.push(`<span class="mon-stat">TLS <b>${esc(s.grade)}</b></span>`);
+      if(s.blacklisted!=null) stats.push(`<span class="mon-stat">Blacklist <b>${s.blacklisted?'listed':'clean'}</b></span>`);
+      if(s.aRecords&&s.aRecords.length) stats.push(`<span class="mon-stat">A <b>${esc(s.aRecords[0])}${s.aRecords.length>1?` +${s.aRecords.length-1}`:''}</b></span>`);
+    }
+    const changes=(w.lastChanges||[]).map(c=>`<div class="mon-change"><i data-lucide="alert-triangle"></i>${esc(c)}</div>`).join('');
+    return `<div class="mon-item">
+      <div class="mon-row1">
+        <span class="mon-dot ${lvl}"></span>
+        <span class="mon-domain">${esc(w.domain)}</span>
+        <button class="mon-remove" onclick="unwatch('${esc(w.domain)}')">Remove</button>
+      </div>
+      <div class="mon-stats">${stats.join('')||'<span class="mon-stat">Not checked yet</span>'}</div>
+      ${changes?`<div class="mon-changes">${changes}</div>`:''}
+      <div class="mon-checked">${s?('Last checked '+relTime(s.ts)):'Added '+relTime(w.addedAt)}</div>
+    </div>`;
+  }).join('');
+  if(window.lucide) lucide.createIcons({ root: list });
+}
+function unwatch(domain){
+  setWatch(getWatch().filter(w=>w.domain!==domain));
+  renderMonitor(); syncWatchBtn();
+  toast(`Stopped monitoring ${domain}`,'info',2000);
+}
+function openMonitor(){
+  renderMonitor();
+  $('monOverlay').classList.add('open');
+  if(window.lucide) lucide.createIcons({ root: $('monOverlay') });
+  if(getWatch().length) refreshMonitor(true);  // silent freshen on open
+}
+function closeMonitor(){ $('monOverlay').classList.remove('open'); }
+
+// Auto-poll every 15 minutes while the tab is open (silent — toasts only on change).
+setInterval(()=>{ if(getWatch().length && document.visibilityState==='visible') refreshMonitor(true); }, 15*60*1000);
 
 // ── Render: Security Headers ───────────────────────────────────
 function renderHeaders(data){
@@ -2457,6 +3309,49 @@ function exportResults(){
   const a=document.createElement('a');
   a.href=url; a.download=`hetops-dns-${domain}-${Date.now()}.json`; a.click();
   URL.revokeObjectURL(url);
+  toast('Report exported as JSON','ok');
+}
+
+// ── Share & PDF ────────────────────────────────────────────────
+function getActiveTab(){
+  const t=document.querySelector('.tab-btn.active');
+  return t ? t.id.replace('tab-','') : '';
+}
+// Build a shareable permalink for the current report (domain + active tab).
+function buildShareURL(){
+  const domain=$('currentDomain').textContent||'';
+  if(!domain) return null;
+  const u=new URL(window.location.pathname, window.location.origin);
+  u.searchParams.set('domain', domain);
+  const tab=getActiveTab(); if(tab) u.searchParams.set('tab', tab);
+  return u.toString();
+}
+function shareLink(){
+  const link=buildShareURL();
+  if(!link){ toast('Run an analysis first','warn'); return; }
+  navigator.clipboard.writeText(link)
+    .then(()=>toast('Share link copied to clipboard','ok'))
+    .catch(()=>toast('Could not copy link','err'));
+}
+function exportPDF(){
+  if(!($('currentDomain').textContent||'')){ toast('Run an analysis first','warn'); return; }
+  toast('Opening print dialog — choose "Save as PDF"','info',2600);
+  setTimeout(()=>window.print(), 350);
+}
+// Keep the address bar in sync so the current report is always bookmarkable.
+function syncURL(domain){
+  try{
+    const u=new URL(window.location.pathname, window.location.origin);
+    u.searchParams.set('domain', domain);
+    history.replaceState(null, '', u);
+  }catch(e){}
+}
+// Open a specific result tab by name, selecting its parent category first.
+function deepLinkTab(name){
+  const btn=$('tab-'+name); if(!btn) return;
+  const group=btn.closest('.sub-tabs-group');
+  if(group){ const m=group.id.match(/^cat-(.+)-tabs$/); if(m) selectCat(m[1]); }
+  tab(name);
 }
 
 // ── Render: Subdomain Takeover ─────────────────────────────────
@@ -2734,15 +3629,20 @@ $('searchInput').addEventListener('blur', ()=>{ setTimeout(hideHistoryDropdown, 
 document.addEventListener('keydown', e=>{
   if(e.key==='Escape'){
     document.getElementById('mobileNavOverlay')?.classList.remove('open');
+    closeCompare();
+    closeMonitor();
     hideHistoryDropdown();
   }
 });
+// Close overlays when clicking the backdrop (but not the panel).
+$('cmpOverlay').addEventListener('click', e=>{ if(e.target.id==='cmpOverlay') closeCompare(); });
+$('monOverlay').addEventListener('click', e=>{ if(e.target.id==='monOverlay') closeMonitor(); });
 
-// ── URL query param auto-run (?q=domain or ?domain=domain) ─────
+// ── URL query param auto-run (?q=domain / ?domain=domain / &tab=ssl) ─────
 (function(){
   const p=new URLSearchParams(window.location.search);
   const d=p.get('q')||p.get('domain');
-  if(d){ $('searchInput').value=d; setTimeout(runLookup,120); }
+  if(d){ $('searchInput').value=d; window.__pendingTab=p.get('tab')||null; setTimeout(runLookup,120); }
 })();
 
 // ── Certificate Download ───────────────────────────────────────

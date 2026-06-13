@@ -268,9 +268,12 @@ app.use((req, res, next) => {
 
 app.set('trust proxy', 2);
 
+// A single full analysis fans out ~28 API calls. Limits are sized so a user can
+// run ~20 back-to-back analyses per minute before throttling kicks in, while
+// still protecting the server from abuse. Cache hits (below) bypass these.
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 300,
+  max: 1500,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please retry in a minute.' }
@@ -278,12 +281,66 @@ const apiLimiter = rateLimit({
 
 const heavyApiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  max: 600,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Rate limit exceeded for intensive checks. Please slow down.' }
 });
 
+// ── In-memory response cache ───────────────────────────────────
+// Single-domain lookups are deterministic over short windows, so caching them
+// makes repeat analyses of the same domain near-instant and keeps repeated runs
+// from ever reaching the rate limiter. Cache hits are served before the limiter.
+const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS) || 5 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 2000;
+const responseCache = new Map(); // key -> { body, status, expires }
+
+function cacheKeyFor(req) {
+  if (req.method !== 'POST') return null;
+  const b = req.body || {};
+  const domain = normalizeDomain(b.domain || '');
+  if (!domain) return null; // only cache deterministic single-domain lookups
+  const extra = [b.resolver, b.type].filter(Boolean).join('|');
+  return `${req.path}::${domain}::${extra}`;
+}
+
+function pruneCache() {
+  const now = Date.now();
+  for (const [k, v] of responseCache) {
+    if (v.expires <= now) responseCache.delete(k);
+  }
+  while (responseCache.size > CACHE_MAX_ENTRIES) {
+    const oldest = responseCache.keys().next().value;
+    responseCache.delete(oldest);
+  }
+}
+setInterval(pruneCache, 60 * 1000).unref();
+
+function cacheMiddleware(req, res, next) {
+  const key = cacheKeyFor(req);
+  if (!key) return next();
+
+  const hit = responseCache.get(key);
+  if (hit && hit.expires > Date.now()) {
+    res.set('X-Cache', 'HIT');
+    return res.status(hit.status).json(hit.body);
+  }
+
+  res.set('X-Cache', 'MISS');
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    // Only cache successful, non-error payloads.
+    if (res.statusCode === 200 && body && !body.error) {
+      responseCache.set(key, { body, status: 200, expires: Date.now() + CACHE_TTL_MS });
+      if (responseCache.size > CACHE_MAX_ENTRIES + 50) pruneCache();
+    }
+    return originalJson(body);
+  };
+  next();
+}
+
+// Cache layer runs before the limiter so cache hits never consume quota.
+app.use('/api', cacheMiddleware);
 app.use('/api', apiLimiter);
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -324,14 +381,21 @@ function createResolver(profileName = 'balanced') {
   return { resolver, profile, servers };
 }
 
+// A valid lookup target is dot-separated labels containing no whitespace and no
+// characters that are illegal in hostnames/URLs (which would otherwise reach a DNS
+// query and throw EBADNAME, or enable injection). IDN/unicode labels are allowed.
+const HOSTNAME_RE = /^[^\s/\\@:?#%&=+'"<>;|`$(){}\[\],*!^~]+(\.[^\s/\\@:?#%&=+'"<>;|`$(){}\[\],*!^~]+)+$/;
+
 function normalizeDomain(input) {
   if (typeof input !== 'string' || input.length > 256) return '';
-  return input
+  const host = input
     .trim()
     .toLowerCase()
     .replace(/^https?:\/\//, '')
     .replace(/\/.*$/, '')
     .replace(/\.$/, '');
+  if (!HOSTNAME_RE.test(host)) return '';
+  return host;
 }
 
 function parseDomains(domain, domains) {
@@ -352,7 +416,7 @@ function parseDomains(domain, domains) {
 }
 
 function isExpectedDnsMiss(err) {
-  return ['ENODATA', 'ENOTFOUND', 'ENODOMAIN', 'ENOTIMP', 'EREFUSED', 'SERVFAIL'].includes(err?.code);
+  return ['ENODATA', 'ENOTFOUND', 'ENODOMAIN', 'ENOTIMP', 'EREFUSED', 'SERVFAIL', 'EBADNAME', 'EFORMERR'].includes(err?.code);
 }
 
 function normalizeRecordForComparison(type, record) {
@@ -3754,6 +3818,7 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     service: 'HetOps DNS Intelligence',
     version: '6.0.0',
+    cache: { entries: responseCache.size, ttlMs: CACHE_TTL_MS },
     features: [
       'batchLookup', 'resolverProfiles', 'securityInsights', 'timingMetrics',
       'authoritativeComparison', 'subdomainDiscovery', 'cnameChainTracing',
@@ -3772,6 +3837,15 @@ app.get('/api/health', (req, res) => {
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Safety net: a single bad lookup must never crash the process and take down the
+// whole portal for every other user. Log and keep serving.
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
 });
 
 app.listen(PORT, () => {
