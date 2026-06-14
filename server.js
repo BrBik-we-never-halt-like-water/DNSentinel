@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const dns = require('node:dns');
 const { Resolver } = require('node:dns').promises;
@@ -9,6 +10,9 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const whois = require('whois');
 const rateLimit = require('express-rate-limit');
+const cookieParser = require('cookie-parser');
+const store = require('./db');
+const mailer = require('./email');
 
 
 function fetchIntermediateCerts(leafCert, timeout = 5000) {
@@ -242,6 +246,7 @@ const configuredOrigins = (process.env.CORS_ORIGINS || '')
 const ALLOWED_ORIGINS = new Set(configuredOrigins.length > 0 ? configuredOrigins : DEFAULT_ALLOWED_ORIGINS);
 
 app.use(express.json());
+app.use(cookieParser());
 
 // CORS policy: only allow configured origins for browser-based calls.
 app.use((req, res, next) => {
@@ -3834,6 +3839,171 @@ app.get('/api/health', (req, res) => {
     ]
   });
 });
+
+// ══ AUTH, ACCOUNTS, HISTORY & ALERTS ═══════════════════════════
+const SID_COOKIE = 'sid';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const inProd = process.env.NODE_ENV === 'production';
+
+function cookieOpts(maxAgeMs) {
+  return { httpOnly: true, sameSite: 'lax', secure: inProd, path: '/', maxAge: maxAgeMs };
+}
+// Resolve the signed-in user (or null) from the session cookie.
+function currentUser(req) {
+  const sess = store.getSession(req.cookies?.[SID_COOKIE]);
+  return sess ? { id: sess.user_id, email: sess.email } : null;
+}
+function requireAuth(req, res, next) {
+  const user = currentUser(req);
+  if (!user) return res.status(401).json({ error: 'Authentication required' });
+  req.user = user;
+  next();
+}
+
+// Stricter limiter for the magic-link request (prevents email spam / enumeration).
+const authRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many sign-in requests. Please try again later.' },
+});
+
+// Request a magic sign-in link.
+app.post('/api/auth/request', authRequestLimiter, async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!EMAIL_RE.test(email) || email.length > 254) return res.status(400).json({ error: 'Valid email is required' });
+  try {
+    const token = store.createLoginToken(email);
+    const base = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+    const url = `${base}/api/auth/verify?token=${token}`;
+    await mailer.sendMagicLink(email, url);
+  } catch (e) {
+    console.error('magic link error:', e.message);
+  }
+  // Always respond the same way so we never reveal whether an address is known.
+  res.json({ ok: true, message: 'Check your inbox for a sign-in link.', consoleMode: !mailer.enabled });
+});
+
+// Verify a magic link → create a session and redirect into the app.
+app.get('/api/auth/verify', (req, res) => {
+  const token = String(req.query.token || '');
+  const email = token && store.consumeLoginToken(token);
+  if (!email) return res.redirect('/?auth=invalid');
+  const user = store.upsertUser(email);
+  const sid = store.createSession(user.id);
+  res.cookie(SID_COOKIE, sid, cookieOpts(30 * 24 * 60 * 60 * 1000));
+  res.redirect('/?auth=ok');
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const user = currentUser(req);
+  res.json(user ? { authenticated: true, email: user.email } : { authenticated: false });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  store.destroySession(req.cookies?.[SID_COOKIE]);
+  res.clearCookie(SID_COOKIE, { path: '/' });
+  res.json({ ok: true });
+});
+
+// ── History sync (per user) ──
+app.get('/api/history', requireAuth, (req, res) => {
+  res.json({ history: store.listHistory(req.user.id) });
+});
+app.post('/api/history', requireAuth, (req, res) => {
+  const { domain, snapshot } = req.body || {};
+  const host = normalizeDomain(domain || '');
+  if (!host) return res.status(400).json({ error: 'Valid domain required' });
+  const ts = Number(snapshot?.ts) || Date.now();
+  store.addHistory(req.user.id, host, ts, snapshot || {});
+  res.json({ ok: true });
+});
+app.delete('/api/history', requireAuth, (req, res) => {
+  store.clearHistory(req.user.id);
+  res.json({ ok: true });
+});
+
+// ── Alerts / watchlist (per user) ──
+app.get('/api/alerts', requireAuth, (req, res) => {
+  res.json({ alerts: store.listAlerts(req.user.id) });
+});
+app.post('/api/alerts', requireAuth, (req, res) => {
+  const host = normalizeDomain(req.body?.domain || '');
+  if (!host) return res.status(400).json({ error: 'Valid domain required' });
+  const emailEnabled = req.body?.emailEnabled !== false;
+  store.addAlert(req.user.id, host, emailEnabled ? 1 : 0);
+  res.json({ ok: true, alerts: store.listAlerts(req.user.id) });
+});
+app.delete('/api/alerts/:domain', requireAuth, (req, res) => {
+  const host = normalizeDomain(req.params.domain || '');
+  if (host) store.removeAlert(req.user.id, host);
+  res.json({ ok: true, alerts: store.listAlerts(req.user.id) });
+});
+
+// ── Alert scheduler ────────────────────────────────────────────
+// Periodically re-checks every watched domain by calling our own endpoints
+// (reusing all logic + the response cache), diffs against the last stored state,
+// and emails the owner when something meaningful changes.
+async function internalLookup(endpoint, domain) {
+  try {
+    const r = await fetch(`http://127.0.0.1:${PORT}/api/${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain, resolver: 'balanced' }),
+    });
+    return await r.json();
+  } catch { return { error: true }; }
+}
+async function checkDomainStatus(domain) {
+  const [ssl, bl, dnsRes] = await Promise.all([
+    internalLookup('ssl', domain),
+    internalLookup('blacklist-check', domain),
+    internalLookup('dns-lookup', domain),
+  ]);
+  const aRecords = (!dnsRes.error && dnsRes.results?.A) ? dnsRes.results.A.map(r => r.value).sort() : [];
+  return {
+    sslDays: (!ssl.error) ? (ssl.certificate?.daysRemaining ?? null) : null,
+    grade: (!ssl.error) ? (ssl.grade?.letter || null) : null,
+    blacklisted: (!bl.error && bl.results) ? bl.results.some(r => r.listed) : null,
+    aRecords,
+  };
+}
+function diffStatus(prev, cur) {
+  const ch = [];
+  if (!prev || !Object.keys(prev).length) return ch;
+  if (prev.sslDays != null && cur.sslDays != null) {
+    for (const t of [7, 30, 90]) if (prev.sslDays > t && cur.sslDays <= t) ch.push(`Certificate now within ${t} days of expiry (${cur.sslDays}d left)`);
+    if (prev.sslDays > 0 && cur.sslDays <= 0) ch.push('Certificate has expired');
+  }
+  if (prev.blacklisted === false && cur.blacklisted === true) ch.push('Domain is now blacklisted');
+  if (prev.blacklisted === true && cur.blacklisted === false) ch.push('Domain removed from blacklists');
+  if (prev.aRecords && cur.aRecords && prev.aRecords.join(',') !== cur.aRecords.join(',') && (prev.aRecords.length || cur.aRecords.length))
+    ch.push(`A record changed: ${prev.aRecords.join(', ') || '∅'} → ${cur.aRecords.join(', ') || '∅'}`);
+  if (prev.grade && cur.grade && prev.grade !== cur.grade) ch.push(`TLS grade changed ${prev.grade} → ${cur.grade}`);
+  return ch;
+}
+let alertRunning = false;
+async function runAlertChecks() {
+  if (alertRunning) return;
+  alertRunning = true;
+  try {
+    const alerts = store.allAlerts();
+    const byDomain = new Map();
+    for (const a of alerts) {
+      if (!byDomain.has(a.domain)) byDomain.set(a.domain, await checkDomainStatus(a.domain));
+      const cur = byDomain.get(a.domain);
+      const changes = diffStatus(a.last, cur);
+      store.updateAlertState(a.id, cur);
+      if (changes.length && a.emailEnabled) {
+        try { await mailer.sendAlertEmail(a.email, a.domain, changes); }
+        catch (e) { console.error('alert email failed:', e.message); }
+      }
+    }
+  } catch (e) {
+    console.error('alert check error:', e.message);
+  } finally {
+    alertRunning = false;
+  }
+}
+const ALERT_INTERVAL_MS = Number(process.env.ALERT_INTERVAL_MS) || 30 * 60 * 1000;
+setInterval(runAlertChecks, ALERT_INTERVAL_MS).unref();
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

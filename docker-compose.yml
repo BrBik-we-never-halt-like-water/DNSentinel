@@ -1,0 +1,22 @@
+# HetOps DNS — production deploy.
+#   1. Put your real values in .env (SMTP_*, MAIL_FROM, APP_URL=https://dns.hetops.dev)
+#   2. docker compose up -d --build
+# The named volume persists the SQLite DB (users, history, alerts) across redeploys.
+services:
+  hetops-dns:
+    build: .
+    image: hetops-dns
+    container_name: hetops-dns
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_PATH: /app/data/hetops.db
+    ports:
+      - "3000:3000"          # point your reverse proxy (dns.hetops.dev) at host :3000
+    volumes:
+      - hetops_data:/app/data # persistent SQLite storage — do NOT remove
+
+volumes:
+  hetops_data:

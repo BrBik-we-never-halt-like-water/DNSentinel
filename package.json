@@ -10,8 +10,12 @@
     "test": "echo \"No tests configured\""
   },
   "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.4.2",
     "express": "^4.18.2",
     "express-rate-limit": "^8.3.2",
+    "nodemailer": "^8.0.11",
     "whois": "^2.16.1"
   },
   "devDependencies": {

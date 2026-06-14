@@ -4,3 +4,6 @@ npm-debug.log
 .gitignore
 README.md
 .env
+data
+*.db
+*.db-*
