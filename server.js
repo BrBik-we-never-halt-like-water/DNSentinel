@@ -421,7 +421,13 @@ function parseDomains(domain, domains) {
 }
 
 function isExpectedDnsMiss(err) {
-  return ['ENODATA', 'ENOTFOUND', 'ENODOMAIN', 'ENOTIMP', 'EREFUSED', 'SERVFAIL', 'EBADNAME', 'EFORMERR'].includes(err?.code);
+  // Treat "no record" outcomes AND transient resolver failures (timeouts, refused,
+  // reset) as a graceful miss. These are best-effort lookups; a transient failure
+  // should degrade to "not found" for this scan rather than throw and crash a check.
+  return [
+    'ENODATA', 'ENOTFOUND', 'ENODOMAIN', 'ENOTIMP', 'EREFUSED', 'SERVFAIL',
+    'EBADNAME', 'EFORMERR', 'ETIMEOUT', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET',
+  ].includes(err?.code);
 }
 
 function normalizeRecordForComparison(type, record) {

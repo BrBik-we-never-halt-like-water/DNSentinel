@@ -151,41 +151,88 @@
 
     /* ══ NAVBAR ══════════════════════════════════════════════════ */
     .navbar {
-      border-bottom: 1px solid rgba(6,182,212,0.15);
       position: sticky; top: 0; z-index: 100;
-      background: rgba(5,5,20,0.88);
-      backdrop-filter: blur(20px) saturate(160%);
-      -webkit-backdrop-filter: blur(20px) saturate(160%);
-      box-shadow: 0 1px 0 rgba(6,182,212,0.12);
+      background: linear-gradient(180deg, rgba(7,7,22,0.92), rgba(5,5,18,0.82));
+      backdrop-filter: blur(22px) saturate(170%);
+      -webkit-backdrop-filter: blur(22px) saturate(170%);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
     }
-    .navbar-inner { display: flex; align-items: center; justify-content: space-between; height: 60px; }
-    .logo { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+    /* Brand accent hairline under the bar */
+    .navbar::after {
+      content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(6,182,212,0.5), rgba(16,185,129,0.5), transparent);
+      opacity: 0.7;
+    }
+    .navbar-inner { display: flex; align-items: center; height: 62px; gap: 18px; }
+
+    /* Logo lockup: gradient app-tile + wordmark + subtitle */
+    .logo { display: flex; align-items: center; gap: 11px; text-decoration: none; flex-shrink: 0; }
+    .logo-tile {
+      width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, rgba(6,182,212,0.18), rgba(16,185,129,0.14));
+      border: 1px solid rgba(6,182,212,0.28);
+      box-shadow: 0 4px 16px rgba(6,182,212,0.18), inset 0 1px 0 rgba(255,255,255,0.08);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .logo:hover .logo-tile { transform: translateY(-1px); box-shadow: 0 6px 22px rgba(6,182,212,0.28), inset 0 1px 0 rgba(255,255,255,0.1); }
+    .logo-tile img { display: block; }
+    .logo-lockup { display: flex; flex-direction: column; gap: 2px; line-height: 1; }
     .logo-wordmark {
       font-family: 'Plus Jakarta Sans', sans-serif;
       font-weight: 900; font-style: italic;
-      font-size: 22px; letter-spacing: -0.5px; line-height: 1;
-      user-select: none;
+      font-size: 19px; letter-spacing: -0.5px; line-height: 1; user-select: none;
     }
     .logo-wordmark .het { color: var(--text); }
-    .logo-wordmark .ops { color: var(--brand); text-shadow: 0 0 20px var(--brand-glow); }
-    .logo-divider { width: 1px; height: 20px; background: rgba(255,255,255,0.12); }
-    .logo-tool {
-      font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
-      color: var(--accent); padding: 3px 10px;
-      background: linear-gradient(135deg, rgba(6,182,212,0.15), rgba(6,182,212,0.06));
-      border: 1px solid var(--accent-border);
-      border-radius: 6px;
-      text-shadow: 0 0 12px var(--accent-glow);
-      box-shadow: 0 0 16px rgba(6,182,212,0.12), inset 0 1px 0 rgba(255,255,255,0.05);
+    .logo-wordmark .ops { color: var(--brand); }
+    .logo-sub {
+      font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 500;
+      letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-faint);
     }
+    .logo-divider, .logo-tool { display: none; }
+
+    /* Functional header search — revealed once the user has run an analysis,
+       so the landing page isn't redundant with the big hero search. */
+    .nav-search {
+      flex: 1; max-width: 440px; margin: 0 auto;
+      display: none; align-items: center; gap: 9px;
+      height: 40px; padding: 0 12px; border-radius: 11px;
+      background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+      transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
+    }
+    body.has-results .nav-search { display: flex; }
+    .nav-search:focus-within {
+      border-color: var(--accent-border); background: rgba(6,182,212,0.06);
+      box-shadow: 0 0 0 3px rgba(6,182,212,0.08);
+    }
+    .nav-search-ico { width: 15px; height: 15px; color: var(--text-faint); flex-shrink: 0; }
+    .nav-search input {
+      flex: 1; min-width: 0; background: none; border: none; outline: none;
+      color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    }
+    .nav-search input::placeholder { color: var(--text-faint); }
+    .nav-search-kbd {
+      font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-faint);
+      background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+      border-radius: 5px; padding: 1px 6px; flex-shrink: 0;
+    }
+
+    .nav-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
     .nav-links { display: flex; align-items: center; gap: 2px; }
     .nav-link {
+      display: inline-flex; align-items: center; gap: 6px;
       font-size: 13px; font-weight: 500; color: var(--text-muted);
-      text-decoration: none; padding: 7px 14px; border-radius: 10px;
+      text-decoration: none; padding: 7px 12px; border-radius: 9px;
       transition: color 0.18s, background 0.18s;
     }
     .nav-link:hover { color: var(--text); background: rgba(255,255,255,0.05); }
     .nav-link.active { color: var(--brand); }
+    .nav-status-dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--ok);
+      box-shadow: 0 0 8px var(--ok); animation: dotPulse 2.4s ease-in-out infinite;
+    }
+    .nav-sep { width: 1px; height: 20px; background: rgba(255,255,255,0.1); margin: 0 8px; }
+    @media (max-width: 760px) { body.has-results .nav-search { display: none; } }
 
     /* ══ HERO ════════════════════════════════════════════════════ */
     .hero {
@@ -216,15 +263,15 @@
 
     .hero-title {
       font-family: 'Plus Jakarta Sans', sans-serif;
-      font-size: 72px; font-weight: 900;
-      letter-spacing: -3.5px; line-height: 1;
-      margin-bottom: 22px;
+      font-size: clamp(2.25rem, 8vw, 72px); font-weight: 900;
+      letter-spacing: -3.5px; line-height: 1.02;
+      margin-bottom: 22px; overflow-wrap: break-word;
       transition: font-size 0.45s cubic-bezier(.4,0,.2,1),
                   letter-spacing 0.45s, margin-bottom 0.45s;
       animation: fadeSlideUp 0.7s 0.15s ease both;
     }
     .hero.compact .hero-title {
-      font-size: 38px; letter-spacing: -1.5px; margin-bottom: 22px;
+      font-size: clamp(1.6rem, 6vw, 38px); letter-spacing: -1.5px; margin-bottom: 22px;
       animation: none;
     }
 
@@ -630,13 +677,15 @@
     .tab-health.err  { display:block; background:var(--err);   box-shadow:0 0 5px rgba(239,68,68,.7); }
 
     /* ══ SEARCH HISTORY ══════════════════════════════════════════ */
-    .search-wrap { position: relative; }
+    /* High stacking context so the history dropdown sits above the example chips /
+       tool buttons below it (those hold stacking contexts via fill:both animations). */
+    .search-wrap { position: relative; z-index: 60; }
     .search-history {
       position: absolute; top: calc(100% + 8px); left: 0; right: 0;
-      background: rgba(8,8,28,0.98); border: 1px solid var(--border);
-      border-radius: 14px; overflow: hidden;
+      background: #0a0a1e; border: 1px solid var(--border-hi);
+      border-radius: 14px; overflow-y: auto; max-height: 320px;
       box-shadow: 0 12px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(6,182,212,0.08);
-      z-index: 50; backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+      z-index: 60;
     }
     .history-header {
       display: flex; align-items: center; justify-content: space-between;
@@ -822,6 +871,12 @@
     }
     .sc-view:hover { color: var(--accent); border-color: var(--accent-border); background: rgba(6,182,212,.06); }
     .sc-empty { font-size: 13px; color: var(--text-muted); padding: 8px 2px; }
+    .sc-scanning { display: flex; align-items: center; gap: 10px; font-size: 12.5px;
+      color: var(--text-muted); padding: 10px 2px; }
+    /* Compact one-line scorecard shown while the score is still calculating */
+    .scorecard.sc-loading { display: flex; align-items: center; gap: 11px;
+      padding: 13px 18px; font-size: 12.5px; color: var(--text-muted); }
+    .scorecard.sc-loading b { color: var(--text-dim); font-weight: 600; }
     .sc-badge-row { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }
     .sc-badge-lbl { font-size: 11px; color: var(--text-faint); }
 
@@ -989,9 +1044,22 @@
     .mobile-nav-link:hover { color: var(--text); background: rgba(255,255,255,0.05); }
     .mobile-nav-link.active { color: var(--brand); background: var(--brand-subtle); }
     .mobile-nav-link svg { width:18px; height:18px; }
+    .mobile-acct { margin-top: auto; padding-top: 20px; border-top: 1px solid var(--border); }
+    .mobile-acct .nav-signin { width: 100%; justify-content: center; font-size: 15px; padding: 13px; }
+    .mobile-acct-user { font-size: 13px; color: var(--text-dim); display: flex; align-items: center; gap: 10px;
+      padding: 12px 4px; }
+    .mobile-acct-user .av { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+      background: linear-gradient(135deg, var(--accent), var(--brand)); color: #03130d;
+      display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; }
+    .mobile-acct-logout { width: 100%; justify-content: center; margin-top: 10px; background: rgba(255,255,255,.04);
+      border: 1px solid var(--border); color: var(--text-muted); border-radius: 10px; padding: 12px;
+      font-family: 'Space Grotesk', sans-serif; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .mobile-acct-logout:hover { color: var(--err); border-color: rgba(239,68,68,.3); }
     @media (max-width: 640px) {
-      .nav-links { display: none; }
+      .nav-links, .nav-sep, .nav-acct { display: none; }
       .nav-mobile-btn { display: flex; }
+      .navbar-inner { height: 58px; }
+      .logo-tile { width: 34px; height: 34px; }
     }
 
     /* ══ RESPONSIVE ══════════════════════════════════════════════ */
@@ -1003,13 +1071,33 @@
       .whois-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 640px) {
+      .container    { padding: 0 16px; }
+      .hero         { padding: 56px 0 44px; }
+      .hero-title   { font-size: 30px; letter-spacing: -0.8px; }
+      .hero-sub     { font-size: 13.5px; margin-bottom: 30px; }
+      .examples     { gap: 6px; }
+      .example-chip { font-size: 11px; padding: 5px 10px; }
       .stats-row    { grid-template-columns: 1fr 1fr; }
-      .hero-title   { font-size: 40px; }
       .nav-links    { display: none; }
       .domain-title { font-size: 20px; }
       .wrow         { grid-template-columns: 1fr; gap: 3px; }
       .prop-row     { grid-template-columns: 1fr auto; }
       .prop-row .prop-vals { display: none; }
+      /* Search: stack input + button so the button never runs off-screen */
+      .search-row   { flex-direction: column; }
+      .btn-analyze  { width: 100%; padding: 14px; }
+      .hero-tools   { flex-wrap: wrap; }
+      /* Domain header: stack the title above the score/actions row */
+      .domain-hdr       { flex-direction: column; align-items: stretch; padding: 20px; }
+      .domain-hdr-right { width: 100%; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+      .hdr-actions      { width: 100%; }
+      /* Overlays: tighter padding + stacked compare selectors on small screens */
+      .cmp-panel        { padding: 18px 16px; }
+      .cmp-selectors    { flex-direction: column; align-items: stretch; gap: 8px; }
+      .cmp-vs           { text-align: center; }
+      .cmp-grid th, .cmp-grid td { padding: 8px 8px; font-size: 12px; }
+      .sc-item          { flex-wrap: wrap; }
+      .sc-view          { margin-top: 6px; }
     }
 
     /* ══ REDUCED MOTION ══════════════════════════════════════════ */
@@ -1075,23 +1163,34 @@
 <nav class="navbar" aria-label="Primary navigation">
   <div class="container">
     <div class="navbar-inner">
-      <a href="/" class="logo">
-        <div class="logo-wordmark"><span class="het">HET</span><span class="ops">OPS_</span></div>
-        <div class="logo-divider"></div>
-        <span class="logo-tool">DNS</span>
+      <a href="/" class="logo" aria-label="HetOps DNS home">
+        <span class="logo-tile"><img src="/icon.svg" alt="" width="22" height="22"></span>
+        <span class="logo-lockup">
+          <span class="logo-wordmark"><span class="het">HET</span><span class="ops">OPS_</span></span>
+          <span class="logo-sub">DNS&nbsp;Intelligence</span>
+        </span>
       </a>
-      <nav class="nav-links" aria-label="HetOps links">
-        <a href="https://hetops.dev"        class="nav-link" target="_blank" rel="noopener">Portfolio</a>
-        <a href="https://tools.hetops.dev"  class="nav-link" target="_blank" rel="noopener">Tools</a>
-        <a href="https://status.hetops.dev" class="nav-link" target="_blank" rel="noopener">Status</a>
-        <a href="/"                         class="nav-link active">DNS</a>
+
+      <form class="nav-search" id="navSearch" role="search" onsubmit="return navSearchSubmit(event)">
+        <i data-lucide="search" class="nav-search-ico"></i>
+        <input id="navSearchInput" type="text" placeholder="Analyze a domain…" autocomplete="off" spellcheck="false" aria-label="Analyze a domain">
+        <kbd class="nav-search-kbd">↵</kbd>
+      </form>
+
+      <div class="nav-right">
+        <nav class="nav-links" aria-label="HetOps ecosystem">
+          <a href="https://hetops.dev"        class="nav-link" target="_blank" rel="noopener">Portfolio</a>
+          <a href="https://tools.hetops.dev"  class="nav-link" target="_blank" rel="noopener">Tools</a>
+          <a href="https://status.hetops.dev" class="nav-link" target="_blank" rel="noopener"><span class="nav-status-dot"></span>Status</a>
+        </nav>
+        <span class="nav-sep"></span>
         <span class="nav-acct" id="navAcct">
           <button class="nav-signin" id="navSignin" onclick="openLogin()"><i data-lucide="log-in"></i>Sign in</button>
         </span>
-      </nav>
-      <button class="nav-mobile-btn" id="mobileNavBtn" aria-label="Open navigation" onclick="document.getElementById('mobileNavOverlay').classList.add('open')">
-        <i data-lucide="menu"></i>
-      </button>
+        <button class="nav-mobile-btn" id="mobileNavBtn" aria-label="Open navigation" onclick="document.getElementById('mobileNavOverlay').classList.add('open')">
+          <i data-lucide="menu"></i>
+        </button>
+      </div>
     </div>
   </div>
 </nav>
@@ -1112,6 +1211,7 @@
     <a href="https://status.hetops.dev" class="mobile-nav-link" target="_blank" rel="noopener"><i data-lucide="activity"></i>Status</a>
     <a href="/"                         class="mobile-nav-link active"><i data-lucide="search"></i>DNS</a>
   </nav>
+  <div class="mobile-acct" id="mobileAcct"></div>
 </div>
 
 <div class="container">
@@ -1584,9 +1684,21 @@ function selectCat(name){
 // ── Quick search ───────────────────────────────────────────────
 function quickSearch(d){ $('searchInput').value=d; runLookup(); }
 
+// Header command-bar search — analyze a domain from anywhere without scrolling up.
+function navSearchSubmit(e){
+  e.preventDefault();
+  const v=$('navSearchInput').value.trim();
+  if(!v) return false;
+  $('searchInput').value=v;
+  $('navSearchInput').blur();
+  runLookup();
+  return false;
+}
+
 // ── Main lookup ────────────────────────────────────────────────
 let currentRun = null;   // AbortController for the in-flight analysis
 let runToken = 0;        // guards late callbacks from superseded runs
+let analyzing = false;   // true while an analysis is in flight (drives scorecard loading state)
 
 // Promise-based delay that rejects if the run is aborted mid-wait.
 function sleep(ms, signal){
@@ -1642,6 +1754,8 @@ async function runLookup(){
 
   saveHistory(domain);
   syncURL(domain);
+  document.body.classList.add('has-results');   // reveal the header command-bar search
+  $('navSearchInput').value = domain;            // keep it in sync with the current domain
   hideHistoryDropdown();
   const analyzeBtn = document.querySelector('.btn-analyze');
   if(analyzeBtn){ analyzeBtn.disabled = true; analyzeBtn.textContent = 'Analyzing…'; }
@@ -1688,7 +1802,8 @@ async function runLookup(){
   $('dnssecChainContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Validating DNSSEC chain of trust…</div></div>';
 
   Object.keys(S).forEach(k=>S[k]=null);
-  const sc=$('scorecard'); if(sc){ sc.style.display='none'; sc.innerHTML=''; }
+  analyzing = true;
+  renderScorecard();          // show the scorecard's "analyzing…" state immediately
   selectCat('core');
   await go(domain, signal, myToken);
 }
@@ -1744,10 +1859,11 @@ async function go(domain, signal, myToken){
   // 6 concurrent requests keeps the UI responsive and stays well under server limits.
   await runPool(tasks, 6, signal);
 
-  if(signal.aborted || myToken !== runToken) return;  // a newer run owns the UI now
+  if(signal.aborted || myToken !== runToken){ analyzing = false; return; }  // a newer run owns the UI now
   const analyzeBtn = document.querySelector('.btn-analyze');
   if(analyzeBtn){ analyzeBtn.disabled = false; analyzeBtn.textContent = 'Analyze →'; }
 
+  analyzing = false;
   renderScorecard();
   syncWatchBtn();
   const prevSnap = saveSnapshot(domain);
@@ -2331,6 +2447,7 @@ function score(){
   if(S.geoip?.geo?.country_name) chips.push(`<span class="pill">${cFlag(S.geoip.geo.country_name)} ${esc(S.geoip.geo.country_name)}</span>`);
   if(S.geoip?.geo?.org) chips.push(`<span class="pill">${esc(S.geoip.geo.org)}</span>`);
   $('domainChips').innerHTML=chips.join('');
+  renderScorecard();   // progressively populate the scorecard as checks complete
 }
 
 // ── Security Scorecard ─────────────────────────────────────────
@@ -2423,7 +2540,17 @@ const SEV_LABEL = { crit:'Critical', high:'High', med:'Medium', low:'Low', good:
 function renderScorecard(){
   const el=$('scorecard'); if(!el) return;
   const findings=collectFindings();
-  if(!findings.length){ el.style.display='none'; return; }
+  if(!findings.length){
+    if(analyzing){
+      // Slim, unobtrusive bar while scoring, so the record panels below stay visible.
+      el.style.display='';
+      el.className='card scorecard sc-loading';
+      el.innerHTML=`<span class="load-spinner" style="width:15px;height:15px;border-width:2px"></span>
+        <span><b>Security scorecard</b> — calculating score, your records are loading below…</span>`;
+    } else { el.style.display='none'; }
+    return;
+  }
+  el.className='card scorecard';
   const h=computeHealth();
   const counts={crit:0,high:0,med:0,low:0,good:0};
   findings.forEach(x=>counts[x.sev]++);
@@ -2455,6 +2582,7 @@ function renderScorecard(){
         ${countPill('good','good','Passed')}
       </div>
     </div>
+    ${analyzing?`<div class="sc-scanning"><span class="load-spinner" style="width:14px;height:14px;border-width:2px"></span>Still analyzing — more findings may appear…</div>`:''}
     <div class="sc-list">${items}</div>
     <div class="sc-badge-row">
       <span class="sc-badge-lbl">Grade: <strong style="color:${h?h.gc:'var(--text)'}">${gradeTxt}</strong></span>
@@ -2805,8 +2933,8 @@ let currentUser = null;  // { email } when signed in
 
 function renderAccount(){
   const acct=$('navAcct'); if(!acct) return;
+  const initial=currentUser?(currentUser.email[0]||'?').toUpperCase():'';
   if(currentUser){
-    const initial=(currentUser.email[0]||'?').toUpperCase();
     acct.innerHTML=`<span class="nav-user">
       <span class="nav-user-chip"><span class="av">${esc(initial)}</span>${esc(currentUser.email)}</span>
       <button class="nav-logout" onclick="logout()" title="Sign out"><i data-lucide="log-out"></i></button>
@@ -2815,6 +2943,15 @@ function renderAccount(){
     acct.innerHTML=`<button class="nav-signin" id="navSignin" onclick="openLogin()"><i data-lucide="log-in"></i>Sign in</button>`;
   }
   if(window.lucide) lucide.createIcons({ root: acct });
+  // Mirror account state into the mobile nav overlay.
+  const macct=$('mobileAcct');
+  if(macct){
+    macct.innerHTML = currentUser
+      ? `<div class="mobile-acct-user"><span class="av">${esc(initial)}</span>${esc(currentUser.email)}</div>
+         <button class="mobile-acct-logout" onclick="logout();closeMobileNav()">Sign out</button>`
+      : `<button class="nav-signin" onclick="openLogin()"><i data-lucide="log-in"></i>Sign in</button>`;
+    if(window.lucide) lucide.createIcons({ root: macct });
+  }
   // Reflect auth state in the monitoring note.
   const note=$('monNote');
   if(note) note.innerHTML=`<i data-lucide="info"></i>Checks run automatically every 15 minutes while this tab is open. ${currentUser?'Email alerts are sent to <b>'+esc(currentUser.email)+'</b> even when the tab is closed.':'<b>Sign in</b> to receive email alerts even when the tab is closed.'}`;
@@ -2830,7 +2967,9 @@ async function checkAuth(){
   if(currentUser){ await pullServerData(); }
 }
 
+function closeMobileNav(){ document.getElementById('mobileNavOverlay')?.classList.remove('open'); }
 function openLogin(){
+  closeMobileNav();  // ensure the login modal isn't hidden behind the mobile menu
   $('loginBody').innerHTML=`<p style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:16px">Sign in with a magic link to save your scan history across devices and receive email alerts for domains you monitor. No password required.</p>
     <form id="loginForm" onsubmit="return submitLogin(event)">
       <input id="loginEmail" class="cmp-select" type="email" placeholder="you@example.com" autocomplete="email" required style="width:100%;margin-bottom:12px;cursor:text;font-family:'Space Grotesk',sans-serif">
@@ -2864,6 +3003,12 @@ async function submitLogin(e){
 async function logout(){
   try{ await fetch('/api/auth/logout',{method:'POST'}); }catch(e){}
   currentUser=null; renderAccount();
+  // Clear locally-cached account data so it isn't visible after signing out
+  // (history, comparisons, watchlist and recent searches were synced from the server).
+  try{ localStorage.removeItem(SNAP_KEY); localStorage.removeItem(WATCH_KEY); localStorage.removeItem(HIST_KEY); }catch(e){}
+  closeCompare(); closeMonitor(); hideHistoryDropdown();
+  renderMonitor(); syncWatchBtn();
+  if($('cmpOverlay').classList.contains('open')){ renderHistory(); renderCompare(); }
   toast('Signed out','info',2000);
 }
 
@@ -3480,7 +3625,7 @@ function showHistoryDropdown(){
     <span class="history-domain">${d}</span>
   </button>`).join('');
   dd.style.display='';
-  lucide.createIcons({nodes:[dd]});
+  if(window.lucide) lucide.createIcons({ root: dd });
 }
 function hideHistoryDropdown(){
   const dd=$('searchHistoryDd');
