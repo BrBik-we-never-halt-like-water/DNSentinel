@@ -149,90 +149,42 @@
       border-radius: 16px;
     }
 
-    /* ══ NAVBAR ══════════════════════════════════════════════════ */
+    /* ══ NAVBAR (minimal) ════════════════════════════════════════ */
     .navbar {
       position: sticky; top: 0; z-index: 100;
-      background: linear-gradient(180deg, rgba(7,7,22,0.92), rgba(5,5,18,0.82));
-      backdrop-filter: blur(22px) saturate(170%);
-      -webkit-backdrop-filter: blur(22px) saturate(170%);
-      border-bottom: 1px solid rgba(255,255,255,0.06);
+      background: rgba(6,6,18,0.85);
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      border-bottom: 1px solid rgba(255,255,255,0.07);
     }
-    /* Brand accent hairline under the bar */
-    .navbar::after {
-      content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(6,182,212,0.5), rgba(16,185,129,0.5), transparent);
-      opacity: 0.7;
-    }
-    .navbar-inner { display: flex; align-items: center; height: 62px; gap: 18px; }
+    .navbar-inner { display: flex; align-items: center; justify-content: space-between; height: 60px; gap: 16px; }
 
-    /* Logo lockup: gradient app-tile + wordmark + subtitle */
-    .logo { display: flex; align-items: center; gap: 11px; text-decoration: none; flex-shrink: 0; }
-    .logo-tile {
-      width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0;
-      display: flex; align-items: center; justify-content: center;
-      background: linear-gradient(135deg, rgba(6,182,212,0.18), rgba(16,185,129,0.14));
-      border: 1px solid rgba(6,182,212,0.28);
-      box-shadow: 0 4px 16px rgba(6,182,212,0.18), inset 0 1px 0 rgba(255,255,255,0.08);
-      transition: transform 0.2s, box-shadow 0.2s;
-    }
-    .logo:hover .logo-tile { transform: translateY(-1px); box-shadow: 0 6px 22px rgba(6,182,212,0.28), inset 0 1px 0 rgba(255,255,255,0.1); }
-    .logo-tile img { display: block; }
-    .logo-lockup { display: flex; flex-direction: column; gap: 2px; line-height: 1; }
+    /* Logo: clean wordmark + subtle DNS tag — no icon tile, no subtitle */
+    .logo { display: flex; align-items: baseline; gap: 9px; text-decoration: none; flex-shrink: 0; }
     .logo-wordmark {
       font-family: 'Plus Jakarta Sans', sans-serif;
       font-weight: 900; font-style: italic;
-      font-size: 19px; letter-spacing: -0.5px; line-height: 1; user-select: none;
+      font-size: 20px; letter-spacing: -0.5px; line-height: 1; user-select: none;
     }
     .logo-wordmark .het { color: var(--text); }
     .logo-wordmark .ops { color: var(--brand); }
-    .logo-sub {
-      font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 500;
-      letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-faint);
+    .logo-tool {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--text-faint);
     }
-    .logo-divider, .logo-tool { display: none; }
+    .logo-divider { display: none; }
 
-    /* Functional header search — revealed once the user has run an analysis,
-       so the landing page isn't redundant with the big hero search. */
-    .nav-search {
-      flex: 1; max-width: 440px; margin: 0 auto;
-      display: none; align-items: center; gap: 9px;
-      height: 40px; padding: 0 12px; border-radius: 11px;
-      background: rgba(255,255,255,0.04); border: 1px solid var(--border);
-      transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
-    }
-    body.has-results .nav-search { display: flex; }
-    .nav-search:focus-within {
-      border-color: var(--accent-border); background: rgba(6,182,212,0.06);
-      box-shadow: 0 0 0 3px rgba(6,182,212,0.08);
-    }
-    .nav-search-ico { width: 15px; height: 15px; color: var(--text-faint); flex-shrink: 0; }
-    .nav-search input {
-      flex: 1; min-width: 0; background: none; border: none; outline: none;
-      color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 13px;
-    }
-    .nav-search input::placeholder { color: var(--text-faint); }
-    .nav-search-kbd {
-      font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-faint);
-      background: rgba(255,255,255,0.05); border: 1px solid var(--border);
-      border-radius: 5px; padding: 1px 6px; flex-shrink: 0;
-    }
-
-    .nav-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
+    .nav-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
     .nav-links { display: flex; align-items: center; gap: 2px; }
     .nav-link {
-      display: inline-flex; align-items: center; gap: 6px;
       font-size: 13px; font-weight: 500; color: var(--text-muted);
-      text-decoration: none; padding: 7px 12px; border-radius: 9px;
+      text-decoration: none; padding: 7px 11px; border-radius: 8px;
       transition: color 0.18s, background 0.18s;
     }
-    .nav-link:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .nav-link:hover { color: var(--text); background: rgba(255,255,255,0.04); }
     .nav-link.active { color: var(--brand); }
-    .nav-status-dot {
-      width: 6px; height: 6px; border-radius: 50%; background: var(--ok);
-      box-shadow: 0 0 8px var(--ok); animation: dotPulse 2.4s ease-in-out infinite;
-    }
-    .nav-sep { width: 1px; height: 20px; background: rgba(255,255,255,0.1); margin: 0 8px; }
-    @media (max-width: 760px) { body.has-results .nav-search { display: none; } }
+    .nav-sep { width: 1px; height: 18px; background: rgba(255,255,255,0.09); margin: 0 8px; }
 
     /* ══ HERO ════════════════════════════════════════════════════ */
     .hero {
@@ -480,8 +432,8 @@
     .cat-tab[data-cat="network"].active { color: var(--info);   border-bottom-color: var(--info);   background: rgba(96,165,250,.08); }
     .cat-tab[data-cat="web"].active     { color: var(--accent); border-bottom-color: var(--accent); background: var(--accent-subtle); }
     .cat-tab[data-cat="intelligence"].active { color: #f97316; border-bottom-color: #f97316; background: rgba(249,115,22,.08); }
-    .cat-icon { display:flex; align-items:center; line-height:1; }
-    .cat-icon svg { width:15px; height:15px; flex-shrink:0; }
+    /* Category/sub-category tabs are text-only (icons removed to match the vibe). */
+    .cat-icon { display:none; }
     .cat-label { font-size: 13px; }
     .cat-count {
       font-size: 10px; font-weight: 700; padding: 2px 7px;
@@ -513,8 +465,7 @@
       box-shadow: 0 0 0 1px rgba(6,182,212,.1), 0 2px 8px rgba(6,182,212,.08);
       text-shadow: 0 0 12px rgba(6,182,212,0.3);
     }
-    .tab-icon { display:flex; align-items:center; }
-    .tab-icon svg { width:12px; height:12px; flex-shrink:0; }
+    .tab-icon { display:none; }
 
     /* Pane animation */
     [id^="pane-"] { animation: paneReveal 0.28s ease; }
@@ -1058,8 +1009,7 @@
     @media (max-width: 640px) {
       .nav-links, .nav-sep, .nav-acct { display: none; }
       .nav-mobile-btn { display: flex; }
-      .navbar-inner { height: 58px; }
-      .logo-tile { width: 34px; height: 34px; }
+      .navbar-inner { height: 56px; }
     }
 
     /* ══ RESPONSIVE ══════════════════════════════════════════════ */
@@ -1164,28 +1114,18 @@
   <div class="container">
     <div class="navbar-inner">
       <a href="/" class="logo" aria-label="HetOps DNS home">
-        <span class="logo-tile"><img src="/icon.svg" alt="" width="22" height="22"></span>
-        <span class="logo-lockup">
-          <span class="logo-wordmark"><span class="het">HET</span><span class="ops">OPS_</span></span>
-          <span class="logo-sub">DNS&nbsp;Intelligence</span>
-        </span>
+        <span class="logo-wordmark"><span class="het">HET</span><span class="ops">OPS_</span></span>
+        <span class="logo-tool">DNS</span>
       </a>
-
-      <form class="nav-search" id="navSearch" role="search" onsubmit="return navSearchSubmit(event)">
-        <i data-lucide="search" class="nav-search-ico"></i>
-        <input id="navSearchInput" type="text" placeholder="Analyze a domain…" autocomplete="off" spellcheck="false" aria-label="Analyze a domain">
-        <kbd class="nav-search-kbd">↵</kbd>
-      </form>
-
       <div class="nav-right">
         <nav class="nav-links" aria-label="HetOps ecosystem">
           <a href="https://hetops.dev"        class="nav-link" target="_blank" rel="noopener">Portfolio</a>
           <a href="https://tools.hetops.dev"  class="nav-link" target="_blank" rel="noopener">Tools</a>
-          <a href="https://status.hetops.dev" class="nav-link" target="_blank" rel="noopener"><span class="nav-status-dot"></span>Status</a>
+          <a href="https://status.hetops.dev" class="nav-link" target="_blank" rel="noopener">Status</a>
         </nav>
         <span class="nav-sep"></span>
         <span class="nav-acct" id="navAcct">
-          <button class="nav-signin" id="navSignin" onclick="openLogin()"><i data-lucide="log-in"></i>Sign in</button>
+          <button class="nav-signin" id="navSignin" onclick="openLogin()">Sign in</button>
         </span>
         <button class="nav-mobile-btn" id="mobileNavBtn" aria-label="Open navigation" onclick="document.getElementById('mobileNavOverlay').classList.add('open')">
           <i data-lucide="menu"></i>
@@ -1684,17 +1624,6 @@ function selectCat(name){
 // ── Quick search ───────────────────────────────────────────────
 function quickSearch(d){ $('searchInput').value=d; runLookup(); }
 
-// Header command-bar search — analyze a domain from anywhere without scrolling up.
-function navSearchSubmit(e){
-  e.preventDefault();
-  const v=$('navSearchInput').value.trim();
-  if(!v) return false;
-  $('searchInput').value=v;
-  $('navSearchInput').blur();
-  runLookup();
-  return false;
-}
-
 // ── Main lookup ────────────────────────────────────────────────
 let currentRun = null;   // AbortController for the in-flight analysis
 let runToken = 0;        // guards late callbacks from superseded runs
@@ -1754,8 +1683,6 @@ async function runLookup(){
 
   saveHistory(domain);
   syncURL(domain);
-  document.body.classList.add('has-results');   // reveal the header command-bar search
-  $('navSearchInput').value = domain;            // keep it in sync with the current domain
   hideHistoryDropdown();
   const analyzeBtn = document.querySelector('.btn-analyze');
   if(analyzeBtn){ analyzeBtn.disabled = true; analyzeBtn.textContent = 'Analyzing…'; }
@@ -2940,7 +2867,7 @@ function renderAccount(){
       <button class="nav-logout" onclick="logout()" title="Sign out"><i data-lucide="log-out"></i></button>
     </span>`;
   } else {
-    acct.innerHTML=`<button class="nav-signin" id="navSignin" onclick="openLogin()"><i data-lucide="log-in"></i>Sign in</button>`;
+    acct.innerHTML=`<button class="nav-signin" id="navSignin" onclick="openLogin()">Sign in</button>`;
   }
   if(window.lucide) lucide.createIcons({ root: acct });
   // Mirror account state into the mobile nav overlay.
