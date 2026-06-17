@@ -64,28 +64,31 @@ const newId = (bytes = 32) => crypto.randomBytes(bytes).toString('hex');
 
 // ── Users ──
 const _userByEmail = db.prepare('SELECT * FROM users WHERE email = ?');
-const _insUser = db.prepare('INSERT INTO users (email, created_at) VALUES (?, ?)');
+const _insUserIgnore = db.prepare('INSERT INTO users (email, created_at) VALUES (?, ?) ON CONFLICT(email) DO NOTHING');
+// Race-safe: INSERT-OR-IGNORE then SELECT, so concurrent first-logins can't crash
+// on the UNIQUE(email) constraint and always return the canonical stored row.
 function upsertUser(email) {
-  const existing = _userByEmail.get(email);
-  if (existing) return existing;
-  const info = _insUser.run(email, now());
-  return { id: info.lastInsertRowid, email, created_at: now() };
+  _insUserIgnore.run(email, now());
+  return _userByEmail.get(email);
 }
 
 // ── Login tokens (magic link) ──
 const _insToken = db.prepare('INSERT INTO login_tokens (token, email, expires_at, used) VALUES (?, ?, ?, 0)');
-const _getToken = db.prepare('SELECT * FROM login_tokens WHERE token = ?');
-const _useToken = db.prepare('UPDATE login_tokens SET used = 1 WHERE token = ?');
+const _expirePriorTokens = db.prepare('UPDATE login_tokens SET used = 1 WHERE email = ? AND used = 0');
+// Atomic single-use consumption: only the first caller flips used 0→1 (changes===1).
+const _consumeToken = db.prepare('UPDATE login_tokens SET used = 1 WHERE token = ? AND used = 0 AND expires_at >= ?');
+const _getTokenEmail = db.prepare('SELECT email FROM login_tokens WHERE token = ?');
 function createLoginToken(email, ttlMs = 15 * 60 * 1000) {
+  _expirePriorTokens.run(email);            // invalidate any outstanding links for this email
   const token = newId(24);
   _insToken.run(token, email, now() + ttlMs);
   return token;
 }
 function consumeLoginToken(token) {
-  const row = _getToken.get(token);
-  if (!row || row.used || row.expires_at < now()) return null;
-  _useToken.run(token);
-  return row.email;
+  const info = _consumeToken.run(token, now());
+  if (info.changes !== 1) return null;      // already used / expired / unknown — atomic guard
+  const row = _getTokenEmail.get(token);
+  return row ? row.email : null;
 }
 
 // ── Sessions ──
@@ -115,7 +118,9 @@ function addHistory(userId, domain, ts, snapshotObj) {
   _trimHistory.run(userId, userId, 100);
 }
 function listHistory(userId, limit = 60) {
-  return _listHistory.all(userId, limit).map(r => ({ domain: r.domain, ts: r.ts, ...safeParse(r.snapshot) }));
+  // Spread snapshot FIRST so the authoritative domain/ts columns can't be
+  // overridden by client-supplied fields inside the stored snapshot JSON.
+  return _listHistory.all(userId, limit).map(r => ({ ...safeParse(r.snapshot), domain: r.domain, ts: r.ts }));
 }
 function clearHistory(userId) { _clearHistory.run(userId); }
 

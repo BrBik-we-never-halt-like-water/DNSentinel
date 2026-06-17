@@ -9,6 +9,10 @@
   <link rel="mask-icon" href="/icon.svg" color="#10b981">
   <link rel="apple-touch-icon" href="/icon.svg">
   <meta name="theme-color" content="#050514">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"WebApplication","name":"HetOps DNS Intelligence","url":"https://dns.hetops.dev/","applicationCategory":"SecurityApplication","operatingSystem":"Any","browserRequirements":"Requires JavaScript","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"description":"Comprehensive domain intelligence: DNS records, WHOIS, SSL/TLS analysis, security headers, DNSSEC, global propagation, GeoIP, port scanning, email authentication and more — in one report."}
+  </script>
   <meta property="og:title" content="HetOps DNS — Domain Intelligence">
   <meta property="og:description" content="DNS records, WHOIS, SSL/TLS, security auditing, propagation, GeoIP and more — in one report.">
   <meta property="og:type" content="website">
@@ -1583,6 +1587,10 @@ function cp(txt,btn){
     toast('Copied to clipboard','ok',1800);
   }).catch(()=>toast('Could not copy to clipboard','err'));
 }
+// Attribute-safe escaping (esc() does NOT escape quotes, so it's unsafe for attributes).
+function escAttr(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// Copy from a data-copy attribute — keeps untrusted values out of inline JS (XSS-safe).
+function cpEl(btn){ cp(btn.getAttribute('data-copy')||'', btn); }
 
 // ── Tab switching ──────────────────────────────────────────────
 function tab(name){
@@ -1591,6 +1599,7 @@ function tab(name){
   const btn=$('tab-'+name);
   if(btn){ btn.classList.add('active'); btn.setAttribute('aria-selected','true'); scrollTabIntoView(btn); }
   const pane=$('pane-'+name);
+  if(!pane) return;   // guard: a finding may deep-link to a category with no own pane
   pane.style.display='';
   pane.style.animation='none';
   pane.getBoundingClientRect();
@@ -1822,7 +1831,6 @@ function renderDns(data){
     let rows='';
     for(const r of recs){
       let val='',meta='';
-      const sv=safeCopy(r.value);
       if(type==='MX'){val=esc(r.value);meta=`<span class="rmeta">Priority ${esc(r.priority)}</span>`;}
       else if(type==='SOA'){const d=r.details||{};val=esc(r.value);meta=`<span class="rmeta">serial ${d.serial} · refresh ${d.refresh}s · retry ${d.retry}s · expire ${d.expire}s</span>`;}
       else if(type==='SRV'){val=esc(r.value);meta=`<span class="rmeta">priority ${r.priority} · weight ${r.weight}</span>`;}
@@ -1832,13 +1840,13 @@ function renderDns(data){
       rows+=`<div class="record-row">
         <div class="rtype-badge" style="background:${c.bg};border:1px solid ${c.bd};color:${c.fg}">${type}</div>
         <div class="rvalue">${val}${meta}</div>
-        <div class="record-actions">${ttl}<button class="copy-btn" onclick="cp('${sv}',this)">Copy</button></div>
+        <div class="record-actions">${ttl}<button class="copy-btn" data-copy="${escAttr(r.value)}" onclick="cpEl(this)">Copy</button></div>
       </div>`;
     }
     let annot='';
     if(type==='TXT'){
-      const spf=recs.find(r=>r.value.toLowerCase().startsWith('v=spf1'));
-      const dmarc=recs.find(r=>r.value.toLowerCase().startsWith('v=dmarc1'));
+      const spf=recs.find(r=>String(r.value||'').toLowerCase().startsWith('v=spf1'));
+      const dmarc=recs.find(r=>String(r.value||'').toLowerCase().startsWith('v=dmarc1'));
       if(spf||dmarc) annot=`<div class="record-annot" style="background:rgba(245,158,11,.05);border-color:rgba(245,158,11,.15);color:rgba(245,158,11,.75)">${[spf?'✓ SPF present':null,dmarc?'✓ DMARC present':null].filter(Boolean).join(' · ')}</div>`;
     }
     const html=`<div class="card dns-card">
@@ -1890,7 +1898,7 @@ function renderWhois(data){
   const half=Math.ceil(FIELDS.length/2);
   FIELDS.forEach(([label,key],i)=>{
     const val=p[key]; if(!val) return;
-    const multi=Array.isArray(val)?val.join('<br>'):esc(String(val));
+    const multi=Array.isArray(val)?val.map(v=>esc(String(v))).join('<br>'):esc(String(val));
     let vStyle='', extra='';
     if(key==='registry expiry date'){
       const exp=new Date(Array.isArray(val)?val[0]:val);
@@ -2032,7 +2040,7 @@ function renderSsl(data){
           <div style="font-size:9px;color:var(--text-faint);margin-bottom:4px">SHA-256 FINGERPRINT</div>
           <div style="display:flex;align-items:center;gap:8px">
             <code style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);word-break:break-all;flex:1">${esc(fp256display)}</code>
-            <button onclick="navigator.clipboard.writeText('${fp256short}')" style="background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--text-muted);padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;white-space:nowrap">Copy</button>
+            <button data-copy="${escAttr(fp256short)}" onclick="cpEl(this)" style="background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--text-muted);padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;white-space:nowrap">Copy</button>
           </div>
         </div>`:''}
         ${c.pem?`<div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -2126,7 +2134,7 @@ function renderSsl(data){
           <div style="font-size:9px;color:var(--text-faint);margin-bottom:4px">SHA-256 FINGERPRINT</div>
           <div style="display:flex;align-items:center;gap:8px">
             <code style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-muted);word-break:break-all;flex:1">${esc(cert.fingerprint256)}</code>
-            <button onclick="navigator.clipboard.writeText('${cert.fingerprint256}')" style="background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--text-muted);padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;white-space:nowrap">Copy</button>
+            <button data-copy="${escAttr(cert.fingerprint256)}" onclick="cpEl(this)" style="background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--text-muted);padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;white-space:nowrap">Copy</button>
           </div>
         </div>`:''}
       </div>
@@ -2134,7 +2142,7 @@ function renderSsl(data){
         <div style="font-size:11px;font-weight:600;color:var(--text-faint);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Subject Alt Names (${sans.length})</div>
         <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:${sanShowAll?'none':'80px'};overflow:hidden" id="sanList">${sans.map(s=>`<span class="pill" style="font-family:'JetBrains Mono',monospace;font-size:10px">${esc(s)}</span>`).join('')}</div>
         ${sans.length>20?`<button onclick="const l=$('sanList');l.style.maxHeight=l.style.maxHeight?'':'none';this.textContent=l.style.maxHeight?'Show all ${sans.length}':'Collapse'" style="margin-top:6px;background:none;border:none;color:var(--accent);font-size:11px;cursor:pointer">Show all ${sans.length}</button>`:''}
-        <button onclick="navigator.clipboard.writeText('${sans.join('\\n')}')" style="margin-top:6px;margin-left:8px;background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:5px;font-size:10px;cursor:pointer">Copy all</button>
+        <button data-copy="${escAttr(sans.join('\n'))}" onclick="cpEl(this)" style="margin-top:6px;margin-left:8px;background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:5px;font-size:10px;cursor:pointer">Copy all</button>
       </div>`:''}
     </div>
   </div>
@@ -2225,11 +2233,12 @@ function renderSec(){
 
 // ── Render: Propagation ────────────────────────────────────────
 function renderProp(data){
+  if(data.error){ $('propContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
   const res=data.results||[];
-  const allV=res.filter(r=>r.status==='ok'&&r.records.length>0).map(r=>r.records.map(x=>x.value).sort().join(','));
+  const allV=res.filter(r=>r.status==='ok'&&(r.records||[]).length>0).map(r=>(r.records||[]).map(x=>x.value).sort().join(','));
   const consistent=new Set(allV).size<=1;
   const rows=res.map(r=>{
-    const vals=r.records.map(x=>x.value).join(', ')||'—';
+    const vals=(r.records||[]).map(x=>x.value).join(', ')||'—';
     const ok=r.status==='ok';
     return `<div class="prop-row">
       <div><div class="prop-name">${esc(r.name)}</div><div class="prop-loc">${esc(r.location)} · ${esc(r.ip)}</div></div>
@@ -2303,6 +2312,7 @@ function renderPorts(data){
 function sslStat(d){
   if(d.error){ setStat('sSsl','Error','err'); return; }
   const days=d.certificate?.daysRemaining;
+  if(days==null){ setStat('sSsl','—',''); return; }   // no parseable certificate
   const expired=d.certificate?.expired;
   if(expired||days<0) setStat('sSsl','Invalid','err');
   else if(days<30) setStat('sSsl',days+'d left','err');
@@ -2425,8 +2435,8 @@ function collectFindings(){
   // ── Blacklist ──
   if(S.bl?.results){
     const listed=S.bl.results.filter(r=>r.listed);
-    if(listed.length) add('crit',`Listed on ${listed.length} blacklist${listed.length!==1?'s':''}`,'Being blacklisted harms email deliverability and reputation — request delisting.','core');
-    else add('good','Not on any monitored blacklist','Clean reputation across checked DNSBLs.','core');
+    if(listed.length) add('crit',`Listed on ${listed.length} blacklist${listed.length!==1?'s':''}`,'Being blacklisted harms email deliverability and reputation — request delisting.','dns');
+    else add('good','Not on any monitored blacklist','Clean reputation across checked DNSBLs.','dns');
   }
 
   // ── DNSSEC ──
@@ -2524,15 +2534,13 @@ function renderScorecard(){
 function copyBadge(){
   const domain=$('currentDomain').textContent||'';
   if(!domain){ toast('Run an analysis first','warn'); return; }
-  const h=computeHealth();
-  const grade=h?h.grade:'?';
-  const color=h?(h.pct>=85?'brightgreen':h.pct>=70?'yellowgreen':h.pct>=50?'orange':'red'):'lightgrey';
+  // Use our own live badge endpoint so the grade stays current wherever it's embedded.
   const origin=window.location.origin;
-  const badge=`https://img.shields.io/badge/HetOps_DNS-${encodeURIComponent(grade)}-${color}`;
+  const badge=`${origin}/api/badge/${encodeURIComponent(domain)}.svg`;
   const link=`${origin}/?domain=${encodeURIComponent(domain)}`;
   const md=`[![HetOps DNS](${badge})](${link})`;
   navigator.clipboard.writeText(md)
-    .then(()=>toast('Markdown badge copied to clipboard','ok'))
+    .then(()=>toast('Live Markdown badge copied to clipboard','ok'))
     .catch(()=>toast('Could not copy badge','err'));
 }
 
@@ -2986,6 +2994,11 @@ function removeAlertFromServer(domain){
   }
 })();
 checkAuth();
+
+// PWA: register the service worker (makes the app installable + offline-capable).
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{ navigator.serviceWorker.register('/sw.js').catch(()=>{}); });
+}
 
 // ── Render: Security Headers ───────────────────────────────────
 function renderHeaders(data){

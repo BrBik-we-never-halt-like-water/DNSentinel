@@ -87,7 +87,13 @@ function fetchIntermediateCerts(leafCert, timeout = 5000) {
     async function fetchCert(url) {
       if (!url || visited.has(url) || url.length > 500) return null;
       visited.add(url);
-      
+      // SSRF guard: only fetch AIA URLs over http(s) to non-internal hosts.
+      try {
+        const u = new URL(url);
+        if (!/^https?:$/.test(u.protocol)) return null;
+        if (await hostIsBlocked(u.hostname)) return null;
+      } catch { return null; }
+
       return new Promise((resolveCert) => {
         const isHttps = url.startsWith('https://');
         const client = isHttps ? https : http;
@@ -248,6 +254,27 @@ const ALLOWED_ORIGINS = new Set(configuredOrigins.length > 0 ? configuredOrigins
 app.use(express.json());
 app.use(cookieParser());
 
+// Security headers (defense-in-depth; applies to every response).
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src https://fonts.gstatic.com data:",
+  "img-src 'self' data: https:",
+  "connect-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Content-Security-Policy', CSP);
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
+
 // CORS policy: only allow configured origins for browser-based calls.
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -300,8 +327,15 @@ const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS) || 5 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 2000;
 const responseCache = new Map(); // key -> { body, status, expires }
 
+// Per-user / auth / mutating routes must NEVER be cached — their responses are
+// session-specific and the cache is global (keyed only by domain), so caching them
+// would serve one user's data to another.
+// NOTE: these run inside app.use('/api', ...) middleware, where Express strips the
+// '/api' mount prefix from req.path — so match against the un-prefixed paths.
+const NON_CACHEABLE = ['/auth', '/history', '/alerts'];
 function cacheKeyFor(req) {
   if (req.method !== 'POST') return null;
+  if (NON_CACHEABLE.some((p) => req.path.startsWith(p))) return null;
   const b = req.body || {};
   const domain = normalizeDomain(b.domain || '');
   if (!domain) return null; // only cache deterministic single-domain lookups
@@ -347,6 +381,7 @@ function cacheMiddleware(req, res, next) {
 // Cache layer runs before the limiter so cache hits never consume quota.
 app.use('/api', cacheMiddleware);
 app.use('/api', apiLimiter);
+app.use('/api', ssrfGuard);
 app.use(express.static(path.join(__dirname, 'public')));
 
 const RESOLVER_PROFILES = {
@@ -401,6 +436,61 @@ function normalizeDomain(input) {
     .replace(/\.$/, '');
   if (!HOSTNAME_RE.test(host)) return '';
   return host;
+}
+
+// ── SSRF protection ────────────────────────────────────────────
+// Block outbound connections to private, loopback, link-local (incl. cloud
+// metadata 169.254.169.254), CGNAT, multicast and reserved ranges.
+function ipv4ToLong(ip) {
+  const p = ip.split('.').map(Number);
+  return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3];
+}
+function isBlockedIPv4(ip) {
+  const n = ipv4ToLong(ip);
+  const inRange = (base, bits) => {
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+    return (n & mask) === (ipv4ToLong(base) & mask);
+  };
+  return inRange('0.0.0.0', 8) || inRange('10.0.0.0', 8) || inRange('100.64.0.0', 10)
+    || inRange('127.0.0.0', 8) || inRange('169.254.0.0', 16) || inRange('172.16.0.0', 12)
+    || inRange('192.0.0.0', 24) || inRange('192.168.0.0', 16) || inRange('198.18.0.0', 15)
+    || inRange('224.0.0.0', 4) || inRange('240.0.0.0', 4);
+}
+function isBlockedIp(ip) {
+  const t = net.isIP(ip);
+  if (t === 4) return isBlockedIPv4(ip);
+  if (t === 6) {
+    const lower = ip.toLowerCase().replace(/^\[|\]$/g, '');
+    if (lower === '::1' || lower === '::') return true;
+    if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true; // fe80::/10 link-local
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // fc00::/7 ULA
+    const mapped = lower.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/); // IPv4-mapped
+    if (mapped) return isBlockedIPv4(mapped[1]);
+    return false;
+  }
+  return false;
+}
+// Resolve a host and reject if any resolved address is in a blocked range.
+async function hostIsBlocked(host) {
+  if (!host) return false;
+  if (net.isIP(host)) return isBlockedIp(host);
+  try {
+    const addrs = await dns.promises.lookup(host, { all: true });
+    return addrs.some((a) => isBlockedIp(a.address));
+  } catch {
+    return false; // let the route's own lookup handle resolution failures
+  }
+}
+// Guard middleware: any /api lookup that targets a user-supplied `domain` is
+// blocked from reaching internal/loopback/metadata addresses.
+async function ssrfGuard(req, res, next) {
+  if (req.method !== 'POST') return next();
+  if (NON_CACHEABLE.some((p) => req.path.startsWith(p))) return next(); // not outbound
+  const host = normalizeDomain((req.body && req.body.domain) || '');
+  if (host && await hostIsBlocked(host)) {
+    return res.status(403).json({ error: 'Target host is not permitted (private/internal address).' });
+  }
+  next();
 }
 
 function parseDomains(domain, domains) {
@@ -1272,7 +1362,7 @@ function analyzeSecurityHeaders(headers) {
           const maxAge = valLower.match(/max-age=(\d+)/);
           if (maxAge && parseInt(maxAge[1]) >= 31536000) {
             detail = `max-age: ${maxAge[1]}s (good)`;
-            if (valLower.includes('includeSubDomains')) detail += ', includes subdomains';
+            if (valLower.includes('includesubdomains')) detail += ', includes subdomains';
             if (valLower.includes('preload')) detail += ', preload enabled';
           } else {
             passed = false;
@@ -2381,7 +2471,7 @@ app.post('/api/sshfp', heavyApiLimiter, async (req, res) => {
     const parsed = sshfpRecords.map(r => ({
       algorithm: r.algorithm,
       type: r.type,
-      fingerprint: r.fpiration,
+      fingerprint: r.fingerprint,
       algorithmName: ['RSA', 'DSA', 'ECDSA', 'Ed25519'][r.algorithm - 1] || 'Unknown',
       typeName: ['No Hash', 'SHA-1', 'SHA-256'][r.type] || 'Unknown'
     }));
@@ -2954,7 +3044,7 @@ app.post('/api/cookies', heavyApiLimiter, async (req, res) => {
         else if (lower === 'httponly') cookie.httpOnly = true;
         else if (lower.startsWith('samesite=')) cookie.sameSite = attr.split('=')[1]?.trim();
         else if (lower.startsWith('expires=')) cookie.expires = attr.split('=')[1]?.trim();
-        else if (lower.startswith('max-age=')) cookie.maxAge = parseInt(attr.split('=')[1]);
+        else if (lower.startsWith('max-age=')) cookie.maxAge = parseInt(attr.split('=')[1]);
         else if (lower.startsWith('path=')) cookie.path = attr.split('=')[1]?.trim();
         else if (lower.startsWith('domain=')) cookie.domain = attr.split('=')[1]?.trim();
       });
@@ -3824,6 +3914,63 @@ app.post('/api/dnssec-chain', heavyApiLimiter, async (req, res) => {
     statusMessage: valid ? 'Full DNSSEC chain validated' : signed ? 'DNSSEC configured with issues' : hasDNSKEY ? 'DNSSEC partially configured' : 'DNSSEC not enabled' });
 });
 
+// ── Embeddable grade badge ─────────────────────────────────────
+// Server-side health grade (mirrors the client computeHealth weighting) so we can
+// render a live SVG badge people embed in READMEs — each embed is organic reach.
+async function computeDomainGrade(domain) {
+  const [dnsR, ssl, email, bl] = await Promise.all([
+    internalLookup('dns-lookup', domain),
+    internalLookup('ssl', domain),
+    internalLookup('email-security', domain),
+    internalLookup('blacklist-check', domain),
+  ]);
+  let pts = 0, tot = 0;
+  if (dnsR && !dnsR.error && dnsR.insights?.checks) {
+    const c = dnsR.insights.checks;
+    pts += (c.spf ? 15 : 0) + (c.dmarc ? 15 : 0) + (c.caa ? 10 : 0) + (c.mx ? 10 : 0); tot += 50;
+  }
+  if (email && !email.error && typeof email.overallScore === 'number') { pts += Math.round(email.overallScore * 0.2); tot += 20; }
+  if (ssl && !ssl.error) { const d = ssl.certificate?.daysRemaining; pts += d > 90 ? 30 : d > 30 ? 20 : d > 0 ? 10 : 0; tot += 30; }
+  if (bl && !bl.error && bl.results) { pts += bl.results.some((r) => r.listed) ? 0 : 10; tot += 10; }
+  if (!tot) return null;
+  const pct = Math.round((pts / tot) * 100);
+  const grade = pct >= 95 ? 'A+' : pct >= 85 ? 'A' : pct >= 70 ? 'B' : pct >= 50 ? 'C' : 'D';
+  return { pct, grade };
+}
+function badgeColor(pct) { return pct >= 85 ? '#22c55e' : pct >= 70 ? '#a3e635' : pct >= 50 ? '#f59e0b' : '#ef4444'; }
+function svgBadge(label, message, color) {
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const lw = Math.round(6.5 * label.length) + 12;
+  const mw = Math.round(7 * message.length) + 16;
+  const w = lw + mw;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="20" role="img" aria-label="${esc(label)}: ${esc(message)}">
+  <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
+  <clipPath id="r"><rect width="${w}" height="20" rx="3" fill="#fff"/></clipPath>
+  <g clip-path="url(#r)">
+    <rect width="${lw}" height="20" fill="#1f2330"/>
+    <rect x="${lw}" width="${mw}" height="20" fill="${color}"/>
+    <rect width="${w}" height="20" fill="url(#s)"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
+    <text x="${lw / 2}" y="14">${esc(label)}</text>
+    <text x="${lw + mw / 2}" y="14" font-weight="bold">${esc(message)}</text>
+  </g>
+</svg>`;
+}
+app.get('/api/badge/:domain', async (req, res) => {
+  const host = normalizeDomain((req.params.domain || '').replace(/\.svg$/i, ''));
+  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  if (!host) return res.send(svgBadge('HetOps DNS', 'invalid', '#9ca3af'));
+  try {
+    const g = await computeDomainGrade(host);
+    if (!g) return res.send(svgBadge('HetOps DNS', 'unknown', '#9ca3af'));
+    res.send(svgBadge('HetOps DNS', g.grade, badgeColor(g.pct)));
+  } catch (e) {
+    res.send(svgBadge('HetOps DNS', 'error', '#9ca3af'));
+  }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -3890,13 +4037,18 @@ app.post('/api/auth/request', authRequestLimiter, async (req, res) => {
 
 // Verify a magic link → create a session and redirect into the app.
 app.get('/api/auth/verify', (req, res) => {
-  const token = String(req.query.token || '');
-  const email = token && store.consumeLoginToken(token);
-  if (!email) return res.redirect('/?auth=invalid');
-  const user = store.upsertUser(email);
-  const sid = store.createSession(user.id);
-  res.cookie(SID_COOKIE, sid, cookieOpts(30 * 24 * 60 * 60 * 1000));
-  res.redirect('/?auth=ok');
+  try {
+    const token = String(req.query.token || '');
+    const email = token && store.consumeLoginToken(token);
+    if (!email) return res.redirect('/?auth=invalid');
+    const user = store.upsertUser(email);
+    const sid = store.createSession(user.id);
+    res.cookie(SID_COOKIE, sid, cookieOpts(30 * 24 * 60 * 60 * 1000));
+    res.redirect('/?auth=ok');
+  } catch (e) {
+    console.error('auth verify error:', e.message);
+    res.redirect('/?auth=invalid');
+  }
 });
 
 app.get('/api/auth/me', (req, res) => {
@@ -3963,7 +4115,9 @@ async function checkDomainStatus(domain) {
     internalLookup('blacklist-check', domain),
     internalLookup('dns-lookup', domain),
   ]);
-  const aRecords = (!dnsRes.error && dnsRes.results?.A) ? dnsRes.results.A.map(r => r.value).sort() : [];
+  // null (not []) when the lookup failed, so a transient failure is distinguishable
+  // from a genuine "no records" result and never triggers a false "changed" alert.
+  const aRecords = (!dnsRes.error && dnsRes.results?.A) ? dnsRes.results.A.map(r => r.value).sort() : null;
   return {
     sslDays: (!ssl.error) ? (ssl.certificate?.daysRemaining ?? null) : null,
     grade: (!ssl.error) ? (ssl.grade?.letter || null) : null,
@@ -3996,7 +4150,16 @@ async function runAlertChecks() {
       if (!byDomain.has(a.domain)) byDomain.set(a.domain, await checkDomainStatus(a.domain));
       const cur = byDomain.get(a.domain);
       const changes = diffStatus(a.last, cur);
-      store.updateAlertState(a.id, cur);
+      // Preserve last-known-good values for any field that failed this round, so a
+      // transient resolver failure can't wipe the baseline or flap future alerts.
+      const prev = a.last || {};
+      const merged = {
+        sslDays: cur.sslDays != null ? cur.sslDays : (prev.sslDays ?? null),
+        grade: cur.grade != null ? cur.grade : (prev.grade ?? null),
+        blacklisted: cur.blacklisted != null ? cur.blacklisted : (prev.blacklisted ?? null),
+        aRecords: cur.aRecords != null ? cur.aRecords : (prev.aRecords ?? null),
+      };
+      store.updateAlertState(a.id, merged);
       if (changes.length && a.emailEnabled) {
         try { await mailer.sendAlertEmail(a.email, a.domain, changes); }
         catch (e) { console.error('alert email failed:', e.message); }
