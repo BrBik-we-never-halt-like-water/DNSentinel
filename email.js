@@ -59,8 +59,26 @@ function sendAlertEmail(to, domain, changes) {
   return send({ to, subject: `[HetOps DNS] ${domain}: ${changes[0]}`, html, text: `${domain}\n` + changes.map(c => '- ' + c).join('\n') });
 }
 
+// Weekly digest: one row per monitored domain with its current status.
+function sendDigest(to, rows) {
+  const base = process.env.APP_URL || 'https://dns.hetops.dev';
+  const body = rows.map(r => `
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.07);font-family:monospace;font-size:13px">
+        <a href="${base}/?domain=${encodeURIComponent(r.domain)}" style="color:#10b981;text-decoration:none">${escapeHtml(r.domain)}</a>
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.07);font-size:13px;color:rgba(241,245,249,.75)">${escapeHtml(r.summary)}</td>
+    </tr>`).join('');
+  const html = brandShell('Your weekly domain report', `
+    <p style="font-size:14px;color:rgba(241,245,249,.7);line-height:1.6">Status of the ${rows.length} domain${rows.length !== 1 ? 's' : ''} you're monitoring:</p>
+    <table style="width:100%;border-collapse:collapse;margin-top:8px">${body}</table>
+    <a href="${base}" style="display:inline-block;margin-top:18px;background:rgba(16,185,129,.14);border:1px solid rgba(16,185,129,.32);color:#10b981;text-decoration:none;font-weight:600;padding:10px 18px;border-radius:10px">Open HetOps DNS →</a>`);
+  const text = rows.map(r => `${r.domain}: ${r.summary}`).join('\n');
+  return send({ to, subject: `[HetOps DNS] Weekly report — ${rows.length} domain${rows.length !== 1 ? 's' : ''}`, html, text });
+}
+
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-module.exports = { enabled, send, sendMagicLink, sendAlertEmail };
+module.exports = { enabled, send, sendMagicLink, sendAlertEmail, sendDigest };

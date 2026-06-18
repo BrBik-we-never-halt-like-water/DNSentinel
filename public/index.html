@@ -901,6 +901,8 @@
     .cmp-hist-domain { font-family: 'JetBrains Mono', monospace; font-size: 13px; flex: 1; min-width: 0;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .cmp-hist-meta { font-size: 11px; color: var(--text-faint); flex-shrink: 0; }
+    .cmp-spark { flex-shrink: 0; opacity: .85; }
+    .cmp-spark-empty { width: 72px; flex-shrink: 0; }
     .cmp-hist-delta { font-size: 11px; font-weight: 700; flex-shrink: 0; }
     .cmp-clear { background: none; border: none; color: var(--text-faint); font-size: 11px;
       cursor: pointer; margin-left: 8px; }
@@ -962,6 +964,21 @@
       margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); line-height: 1.5; }
     .mon-note svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; color: var(--accent); }
     .btn-export.watching { background: rgba(16,185,129,.14); border-color: var(--brand-border); color: var(--brand); }
+
+    /* Account panel inside the monitoring overlay */
+    .acct-sec { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+    .acct-h { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-faint);
+      font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
+    .acct-docs { font-size: 11px; color: var(--accent); text-transform: none; letter-spacing: 0; }
+    .acct-row { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-dim); margin-bottom: 12px; }
+    .acct-hint { color: var(--text-faint); font-size: 11px; }
+    .acct-toggle { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--text-dim); cursor: pointer; }
+    .acct-toggle input { accent-color: var(--brand); cursor: pointer; }
+    .acct-keys { display: flex; flex-direction: column; gap: 6px; }
+    .acct-key { display: flex; align-items: center; gap: 10px; padding: 8px 11px; border-radius: 9px;
+      background: rgba(255,255,255,.02); border: 1px solid var(--border); }
+    .acct-key code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); }
+    .acct-key-label { flex: 1; font-size: 12px; color: var(--text-muted); }
 
     /* ══ MOBILE NAV ══════════════════════════════════════════════ */
     .nav-mobile-btn {
@@ -1185,6 +1202,7 @@
     <div class="hero-tools">
       <button class="hero-tool-btn" onclick="openCompare()"><i data-lucide="git-compare"></i>Compare &amp; History</button>
       <button class="hero-tool-btn" onclick="openMonitor()"><i data-lucide="radar"></i>Monitoring</button>
+      <button class="hero-tool-btn" onclick="openBulk()"><i data-lucide="list-checks"></i>Bulk scan</button>
     </div>
   </div>
 
@@ -1496,6 +1514,7 @@
       <button class="hero-tool-btn" id="monRefresh" onclick="refreshMonitor(false)"><i data-lucide="refresh-cw"></i>Check all now</button>
     </div>
     <div id="monList" class="mon-list"></div>
+    <div id="monAccount" style="display:none"></div>
     <div class="mon-note" id="monNote"><i data-lucide="info"></i>Checks run automatically every 15 minutes while this tab is open. <b>Sign in</b> to receive email alerts even when the tab is closed.</div>
   </div>
 </div>
@@ -1517,10 +1536,28 @@
   </div>
 </div>
 
+<!-- ── Bulk scan overlay ─────────────────────────────────── -->
+<div class="cmp-overlay" id="bulkOverlay" role="dialog" aria-modal="true" aria-label="Bulk scan">
+  <div class="cmp-panel" style="max-width:760px">
+    <div class="cmp-head">
+      <div class="cmp-title"><i data-lucide="list-checks"></i>Bulk Scan</div>
+      <button class="cmp-close" aria-label="Close" onclick="closeBulk()"><i data-lucide="x"></i></button>
+    </div>
+    <div id="bulkInput">
+      <p style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:12px">Paste up to 25 domains (one per line or comma-separated). Each gets a quick health grade, certificate, blacklist and DNS check.</p>
+      <textarea id="bulkText" class="cmp-select" rows="6" placeholder="github.com&#10;cloudflare.com&#10;example.com" style="width:100%;resize:vertical;cursor:text;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6"></textarea>
+      <button class="btn-analyze" id="bulkRun" onclick="runBulk()" style="width:100%;margin-top:12px">Scan domains →</button>
+    </div>
+    <div id="bulkResults"></div>
+  </div>
+</div>
+
 <!-- ── Footer ────────────────────────────────────────────── -->
 <footer class="footer">
   <div class="footer-wm"><span class="het">HET</span><span class="ops">OPS_</span></div>
   <div class="footer-links">
+    <a href="/docs"                     class="footer-link">API Docs</a>
+    <span class="footer-dot">·</span>
     <a href="https://hetops.dev"        class="footer-link" target="_blank" rel="noopener">Portfolio</a>
     <span class="footer-dot">·</span>
     <a href="https://tools.hetops.dev"  class="footer-link" target="_blank" rel="noopener">Tools</a>
@@ -2663,6 +2700,21 @@ function gradeColor(g){
   if(g==='C') return 'var(--warn)';
   return 'var(--err)';
 }
+// Tiny inline SVG trend line of score over time (0–100).
+function sparkline(values){
+  if(!values || values.length<2) return '<span class="cmp-spark-empty"></span>';
+  const w=72, h=20, n=values.length;
+  const pts=values.map((v,i)=>{
+    const x=(i/(n-1))*w;
+    const y=h-2-((Math.max(0,Math.min(100,v))/100)*(h-4));
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const last=values[values.length-1], first=values[0];
+  const col=last>=first?'var(--ok)':'var(--err)';
+  return `<svg class="cmp-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
 function renderHistory(){
   const all=getSnaps();
   const wrap=$('cmpHistory');
@@ -2675,9 +2727,12 @@ function renderHistory(){
       const up=s.pct>prev.pct;
       delta=`<span class="cmp-hist-delta" style="color:${up?'var(--ok)':'var(--err)'}">${up?'▲':'▼'}${Math.abs(s.pct-prev.pct)}</span>`;
     }
+    // Trend sparkline from this domain's score history (oldest→newest).
+    const series=all.filter(p=>p.domain===s.domain && p.pct!=null).map(p=>p.pct).reverse();
     return `<div class="cmp-hist-item" onclick="closeCompare();quickSearch('${esc(s.domain)}')">
       <span class="cmp-hist-grade" style="color:${gradeColor(s.grade)}">${esc(s.grade||'—')}</span>
       <span class="cmp-hist-domain">${esc(s.domain)}</span>
+      ${sparkline(series)}
       ${delta}
       <span class="cmp-hist-meta">${s.pct!=null?s.pct+'/100 · ':''}${relTime(s.ts)}</span>
     </div>`;
@@ -2704,6 +2759,7 @@ function currentStatusFromS(){
     sslDays: ok(S.ssl)?(S.ssl.certificate?.daysRemaining??null):null,
     grade: ok(S.ssl)?(S.ssl.grade?.letter||null):null,
     blacklisted: S.bl?.results? S.bl.results.some(r=>r.listed):null,
+    whoisDays: ok(S.whois)?whoisExpiryDays(S.whois.rawData):null,
     aRecords: ok(S.dns)?(((S.dns.results?.A)||[]).map(r=>r.value).sort()):[],
   };
 }
@@ -2737,18 +2793,28 @@ function syncWatchBtn(){
 
 // Fetch only the monitored signals for a domain (cached server-side, so cheap).
 async function monCheck(domain){
-  const [ssl,bl,dns]=await Promise.all([
+  const [ssl,bl,dns,whois]=await Promise.all([
     fetchJSON('/api/ssl',{domain}).catch(()=>({error:1})),
     fetchJSON('/api/blacklist-check',{domain}).catch(()=>({error:1})),
     fetchJSON('/api/dns-lookup',{domain,resolver:'balanced'}).catch(()=>({error:1})),
+    fetchJSON('/api/whois',{domain}).catch(()=>({error:1})),
   ]);
   return {
     ts: Date.now(),
     sslDays: (ssl&&!ssl.error)?(ssl.certificate?.daysRemaining??null):null,
     grade: (ssl&&!ssl.error)?(ssl.grade?.letter||null):null,
     blacklisted: (bl&&!bl.error&&bl.results)?bl.results.some(r=>r.listed):null,
+    whoisDays: (whois&&!whois.error)?whoisExpiryDays(whois.rawData):null,
     aRecords: (dns&&!dns.error)?(((dns.results?.A)||[]).map(r=>r.value).sort()):[],
   };
+}
+// Days until domain registration expiry from raw WHOIS text (null if unknown).
+function whoisExpiryDays(raw){
+  const p=parseWhois(raw||'');
+  const v=p['registry expiry date']||p['registrar registration expiration date']||p['expiry date']||p['expiration date'];
+  if(!v) return null;
+  const t=Date.parse(Array.isArray(v)?v[0]:v);
+  return isNaN(t)?null:Math.floor((t-Date.now())/864e5);
 }
 
 // Compare two status snapshots and describe meaningful changes.
@@ -2758,6 +2824,10 @@ function diffStatus(prev, cur){
   if(prev.sslDays!=null && cur.sslDays!=null){
     for(const t of [7,30,90]) if(prev.sslDays>t && cur.sslDays<=t) ch.push(`Certificate now within ${t} days of expiry (${cur.sslDays}d left)`);
     if(prev.sslDays>0 && cur.sslDays<=0) ch.push('Certificate has expired');
+  }
+  if(prev.whoisDays!=null && cur.whoisDays!=null){
+    for(const t of [7,30]) if(prev.whoisDays>t && cur.whoisDays<=t) ch.push(`Domain registration expires in ${cur.whoisDays} days`);
+    if(prev.whoisDays>0 && cur.whoisDays<=0) ch.push('Domain registration has EXPIRED');
   }
   if(prev.blacklisted===false && cur.blacklisted===true) ch.push('Domain is now blacklisted');
   if(prev.blacklisted===true && cur.blacklisted===false) ch.push('Domain removed from blacklists');
@@ -2797,8 +2867,8 @@ async function refreshMonitor(silent){
 
 function monStatusLevel(s){
   if(!s) return 'idle';
-  if(s.blacklisted===true || (s.sslDays!=null && s.sslDays<=7)) return 'err';
-  if(s.sslDays!=null && s.sslDays<=30) return 'warn';
+  if(s.blacklisted===true || (s.sslDays!=null && s.sslDays<=7) || (s.whoisDays!=null && s.whoisDays<=7)) return 'err';
+  if((s.sslDays!=null && s.sslDays<=30) || (s.whoisDays!=null && s.whoisDays<=30)) return 'warn';
   return 'ok';
 }
 function renderMonitor(){
@@ -2816,6 +2886,7 @@ function renderMonitor(){
     const stats=[];
     if(s){
       if(s.sslDays!=null) stats.push(`<span class="mon-stat">Cert <b>${s.sslDays}d</b></span>`);
+      if(s.whoisDays!=null) stats.push(`<span class="mon-stat">Domain <b>${s.whoisDays}d</b></span>`);
       if(s.grade) stats.push(`<span class="mon-stat">TLS <b>${esc(s.grade)}</b></span>`);
       if(s.blacklisted!=null) stats.push(`<span class="mon-stat">Blacklist <b>${s.blacklisted?'listed':'clean'}</b></span>`);
       if(s.aRecords&&s.aRecords.length) stats.push(`<span class="mon-stat">A <b>${esc(s.aRecords[0])}${s.aRecords.length>1?` +${s.aRecords.length-1}`:''}</b></span>`);
@@ -2854,11 +2925,129 @@ function setAlertEmail(domain, enabled){
 }
 function openMonitor(){
   renderMonitor();
+  renderAccountPanel();
   $('monOverlay').classList.add('open');
   if(window.lucide) lucide.createIcons({ root: $('monOverlay') });
   if(getWatch().length) refreshMonitor(true);  // silent freshen on open
 }
 function closeMonitor(){ $('monOverlay').classList.remove('open'); }
+
+// ── Alert delivery & developer API (signed-in account panel) ───
+async function renderAccountPanel(){
+  const el=$('monAccount'); if(!el) return;
+  if(!currentUser){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='';
+  el.innerHTML=`<div class="mon-acct-loading sc-scanning"><span class="load-spinner" style="width:14px;height:14px;border-width:2px"></span>Loading account settings…</div>`;
+  let settings={}, keys=[];
+  try{
+    [settings, keys]=await Promise.all([
+      fetch('/api/settings').then(r=>r.json()).catch(()=>({})),
+      fetch('/api/keys').then(r=>r.json()).then(d=>d.keys||[]).catch(()=>[]),
+    ]);
+  }catch(e){}
+  const keyRows=keys.length? keys.map(k=>`<div class="acct-key">
+      <code>${esc(k.key.slice(0,10))}…${esc(k.key.slice(-4))}</code>
+      <span class="acct-key-label">${esc(k.label||'')}</span>
+      <button class="mon-remove" onclick="deleteKey('${esc(k.key)}')">Revoke</button>
+    </div>`).join('') : `<div style="font-size:12px;color:var(--text-faint);padding:4px 0">No keys yet.</div>`;
+  el.innerHTML=`
+    <div class="acct-sec">
+      <div class="acct-h">Alert delivery</div>
+      <label class="acct-row"><span>Webhook URL <span class="acct-hint">(Slack / Discord / generic)</span></span>
+        <input id="acctWebhook" class="cmp-select" type="url" placeholder="https://hooks.slack.com/…" value="${escAttr(settings.webhookUrl||'')}" style="cursor:text;font-family:'JetBrains Mono',monospace;font-size:12px">
+      </label>
+      <label class="acct-toggle"><input type="checkbox" id="acctDigest" ${settings.digestEnabled?'checked':''}> Email me a weekly summary of monitored domains</label>
+      <button class="hero-tool-btn" onclick="saveAccountSettings()" style="margin-top:10px"><i data-lucide="save"></i>Save settings</button>
+    </div>
+    <div class="acct-sec">
+      <div class="acct-h">Developer API <a href="/docs" target="_blank" class="acct-docs">Docs ↗</a></div>
+      <div class="acct-keys">${keyRows}</div>
+      <button class="hero-tool-btn" onclick="createKey()" style="margin-top:10px"><i data-lucide="plus"></i>Create API key</button>
+    </div>`;
+  if(window.lucide) lucide.createIcons({ root: el });
+}
+async function saveAccountSettings(){
+  const webhookUrl=$('acctWebhook').value.trim();
+  const digestEnabled=$('acctDigest').checked;
+  try{
+    const r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({webhookUrl,digestEnabled})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Save failed');
+    toast('Settings saved','ok');
+  }catch(e){ toast(e.message||'Could not save settings','err'); }
+}
+async function createKey(){
+  try{
+    const r=await fetch('/api/keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:'API key'})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Failed');
+    if(d.key){ cp(d.key); toast('API key created & copied — store it now','ok',4000); }
+    renderAccountPanel();
+  }catch(e){ toast(e.message||'Could not create key','err'); }
+}
+async function deleteKey(key){
+  try{ await fetch('/api/keys/'+encodeURIComponent(key),{method:'DELETE'}); }catch(e){}
+  renderAccountPanel(); toast('API key revoked','info',2000);
+}
+
+// ── Bulk / multi-domain scan ───────────────────────────────────
+let bulkResults=[];
+function openBulk(){ $('bulkResults').innerHTML=''; $('bulkOverlay').classList.add('open'); if(window.lucide) lucide.createIcons({ root: $('bulkOverlay') }); setTimeout(()=>$('bulkText')?.focus(),50); }
+function closeBulk(){ $('bulkOverlay').classList.remove('open'); }
+
+async function bulkGrade(domain){
+  const [dns,ssl,email,bl]=await Promise.all([
+    fetchJSON('/api/dns-lookup',{domain,resolver:'balanced'}).catch(()=>({error:1})),
+    fetchJSON('/api/ssl',{domain}).catch(()=>({error:1})),
+    fetchJSON('/api/email-security',{domain}).catch(()=>({error:1})),
+    fetchJSON('/api/blacklist-check',{domain}).catch(()=>({error:1})),
+  ]);
+  let pts=0,tot=0;
+  if(dns&&!dns.error&&dns.insights?.checks){ const c=dns.insights.checks; pts+=(c.spf?15:0)+(c.dmarc?15:0)+(c.caa?10:0)+(c.mx?10:0); tot+=50; }
+  if(email&&!email.error&&typeof email.overallScore==='number'){ pts+=Math.round(email.overallScore*0.2); tot+=20; }
+  let sslDays=null; if(ssl&&!ssl.error){ sslDays=ssl.certificate?.daysRemaining??null; pts+=sslDays>90?30:sslDays>30?20:sslDays>0?10:0; tot+=30; }
+  let listed=null; if(bl&&!bl.error&&bl.results){ listed=bl.results.some(r=>r.listed); pts+=listed?0:10; tot+=10; }
+  const pct=tot?Math.round(pts/tot*100):null;
+  const grade=pct==null?'—':pct>=95?'A+':pct>=85?'A':pct>=70?'B':pct>=50?'C':'D';
+  return {domain, pct, grade, sslDays, blacklisted:listed, tls:(ssl&&!ssl.error)?(ssl.grade?.letter||null):null};
+}
+async function runBulk(){
+  const domains=[...new Set($('bulkText').value.split(/[\n,\s]+/).map(d=>norm(d)).filter(Boolean))].slice(0,25);
+  if(!domains.length){ toast('Enter at least one domain','warn'); return; }
+  const btn=$('bulkRun'); btn.disabled=true; btn.textContent='Scanning…';
+  bulkResults=[]; renderBulk(domains,true);
+  let i=0;
+  const worker=async()=>{ while(i<domains.length){ const d=domains[i++]; try{ bulkResults.push(await bulkGrade(d)); }catch(e){ bulkResults.push({domain:d,grade:'—',pct:null}); } renderBulk(domains,true); } };
+  await Promise.all([worker(),worker(),worker()]);   // 3 concurrent
+  renderBulk(domains,false);
+  btn.disabled=false; btn.textContent='Scan domains →';
+  toast(`Scanned ${bulkResults.length} domain${bulkResults.length!==1?'s':''}`,'ok');
+}
+function bulkGradeColor(g){ if(!g||g==='—')return 'var(--text-muted)'; if(g==='A+'||g==='A')return 'var(--ok)'; if(g==='B')return '#a3e635'; if(g==='C')return 'var(--warn)'; return 'var(--err)'; }
+function renderBulk(domains, running){
+  const done=bulkResults.length, total=domains.length;
+  const rows=bulkResults.map(r=>`<tr>
+    <td class="val"><a href="/?domain=${encodeURIComponent(r.domain)}" target="_blank" style="color:var(--accent);text-decoration:none">${esc(r.domain)}</a></td>
+    <td class="val" style="color:${bulkGradeColor(r.grade)};font-weight:700">${esc(r.grade)}${r.pct!=null?` <span style="color:var(--text-faint);font-weight:400">${r.pct}</span>`:''}</td>
+    <td class="val">${r.tls?esc(r.tls):'—'}</td>
+    <td class="val">${r.sslDays!=null?r.sslDays+'d':'—'}</td>
+    <td class="val">${r.blacklisted==null?'—':(r.blacklisted?'<span style="color:var(--err)">listed</span>':'clean')}</td>
+  </tr>`).join('');
+  $('bulkResults').innerHTML=`
+    <div class="cmp-hist-head" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Results ${running?`(${done}/${total})`:`· ${total}`}</span>
+      ${!running&&done?`<button class="cmp-clear" onclick="exportBulkCsv()" style="color:var(--accent)">Export CSV ↓</button>`:''}
+    </div>
+    <table class="cmp-grid"><thead><tr><th>Domain</th><th>Grade</th><th>TLS</th><th>Cert</th><th>Blacklist</th></tr></thead><tbody>${rows}</tbody></table>
+    ${running?`<div class="sc-scanning"><span class="load-spinner" style="width:14px;height:14px;border-width:2px"></span>Scanning…</div>`:''}`;
+}
+function exportBulkCsv(){
+  const head='domain,grade,score,tls_grade,cert_days,blacklisted';
+  const lines=bulkResults.map(r=>[r.domain,r.grade,r.pct??'',r.tls??'',r.sslDays??'',r.blacklisted==null?'':r.blacklisted].join(','));
+  const blob=new Blob([[head,...lines].join('\n')],{type:'text/csv'}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='hetops-bulk-scan.csv'; a.click(); URL.revokeObjectURL(url);
+  toast('CSV exported','ok');
+}
 
 // Auto-poll every 15 minutes while the tab is open (silent — toasts only on change).
 setInterval(()=>{ if(getWatch().length && document.visibilityState==='visible') refreshMonitor(true); }, 15*60*1000);
@@ -3935,6 +4124,7 @@ document.addEventListener('keydown', e=>{
     closeCompare();
     closeMonitor();
     closeLogin();
+    closeBulk();
     hideHistoryDropdown();
   }
 });
@@ -3942,6 +4132,7 @@ document.addEventListener('keydown', e=>{
 $('cmpOverlay').addEventListener('click', e=>{ if(e.target.id==='cmpOverlay') closeCompare(); });
 $('monOverlay').addEventListener('click', e=>{ if(e.target.id==='monOverlay') closeMonitor(); });
 $('loginOverlay').addEventListener('click', e=>{ if(e.target.id==='loginOverlay') closeLogin(); });
+$('bulkOverlay').addEventListener('click', e=>{ if(e.target.id==='bulkOverlay') closeBulk(); });
 
 // ── URL query param auto-run (?q=domain / ?domain=domain / &tab=ssl) ─────
 (function(){

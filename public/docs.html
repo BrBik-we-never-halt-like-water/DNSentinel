@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HetOps DNS — API Documentation</title>
+  <meta name="description" content="HetOps DNS public API: programmatic domain intelligence — DNS, WHOIS, SSL/TLS, security, propagation, GeoIP and more.">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#050514">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@1,900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{--brand:#10b981;--accent:#06b6d4;--bg:#050514;--card:rgba(12,12,30,.7);--border:rgba(255,255,255,.08);--text:#f1f5f9;--dim:rgba(241,245,249,.62);--faint:rgba(241,245,249,.4)}
+    html{color-scheme:dark}
+    body{background:var(--bg);color:var(--text);font-family:'Space Grotesk',sans-serif;line-height:1.6;padding:0 0 80px}
+    a{color:var(--brand);text-decoration:none}a:hover{text-decoration:underline}
+    .nav{position:sticky;top:0;background:rgba(6,6,18,.85);backdrop-filter:blur(18px);border-bottom:1px solid var(--border);z-index:10}
+    .nav-in{max-width:880px;margin:0 auto;padding:16px 24px;display:flex;align-items:center;justify-content:space-between}
+    .wm{font-family:'Plus Jakarta Sans',sans-serif;font-weight:900;font-style:italic;font-size:19px;letter-spacing:-.5px}
+    .wm .het{color:var(--text)}.wm .ops{color:var(--brand)}
+    .wrap{max-width:880px;margin:0 auto;padding:40px 24px}
+    h1{font-size:34px;font-weight:700;letter-spacing:-1px;margin-bottom:8px}
+    h1 .g{background:linear-gradient(90deg,var(--accent),var(--brand));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+    .lead{color:var(--dim);font-size:15px;margin-bottom:28px}
+    h2{font-size:20px;font-weight:700;margin:38px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+    h3{font-size:15px;margin:22px 0 8px;font-family:'JetBrains Mono',monospace}
+    p{color:var(--dim);margin-bottom:12px;font-size:14px}
+    code{font-family:'JetBrains Mono',monospace;font-size:13px;background:rgba(255,255,255,.06);padding:2px 6px;border-radius:5px;color:#a3e635}
+    pre{background:#0a0a1e;border:1px solid var(--border);border-radius:12px;padding:16px 18px;overflow-x:auto;margin:12px 0;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.55;color:var(--dim)}
+    pre .k{color:var(--accent)}pre .s{color:#a3e635}
+    .method{display:inline-block;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;margin-right:8px}
+    .post{background:rgba(16,185,129,.14);color:var(--brand);border:1px solid rgba(16,185,129,.3)}
+    .get{background:rgba(6,182,212,.14);color:var(--accent);border:1px solid rgba(6,182,212,.3)}
+    .ep{font-family:'JetBrains Mono',monospace;font-size:14px}
+    table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+    td,th{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)}
+    th{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+    td:first-child{font-family:'JetBrains Mono',monospace;color:var(--accent);white-space:nowrap}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin:14px 0}
+    .toc{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+    .toc a{font-size:12px;background:rgba(255,255,255,.04);border:1px solid var(--border);padding:5px 11px;border-radius:8px;color:var(--dim)}
+    .toc a:hover{color:var(--brand);border-color:rgba(16,185,129,.3);text-decoration:none}
+    footer{max-width:880px;margin:40px auto 0;padding:24px;border-top:1px solid var(--border);color:var(--faint);font-size:13px;text-align:center}
+  </style>
+</head>
+<body>
+  <nav class="nav"><div class="nav-in">
+    <a href="/" class="wm"><span class="het">HET</span><span class="ops">OPS_</span></a>
+    <a href="/" style="font-size:13px;color:var(--dim)">← Back to app</a>
+  </div></nav>
+
+  <div class="wrap">
+    <h1>HetOps DNS <span class="g">API</span></h1>
+    <p class="lead">Programmatic domain intelligence over a simple JSON API — DNS, WHOIS, SSL/TLS, security headers, DNSSEC, global propagation, GeoIP, ports, email authentication and more. Free, no key required for normal use.</p>
+
+    <div class="toc">
+      <a href="#basics">Basics</a><a href="#keys">API keys</a><a href="#limits">Rate limits</a>
+      <a href="#endpoints">Endpoints</a><a href="#badge">Status badge</a><a href="#errors">Errors</a>
+    </div>
+
+    <h2 id="basics">Basics</h2>
+    <p>All analysis endpoints accept <code>POST</code> with a JSON body <code>{ "domain": "example.com" }</code> and return JSON. Base URL: <code>https://dns.hetops.dev</code>.</p>
+    <pre><span class="k">curl</span> -X POST https://dns.hetops.dev/api/dns-lookup \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"domain":"github.com"}'</span></pre>
+
+    <h2 id="keys">API keys</h2>
+    <p>Keys are optional — they exempt you from the shared IP rate limit. Create one from the app (sign in → your account → API keys), then pass it as a header:</p>
+    <pre>-H <span class="s">"X-API-Key: hk_xxxxxxxxxxxx"</span></pre>
+
+    <h2 id="limits">Rate limits</h2>
+    <p>Without a key: shared per-IP limit (generous — about 20 full analyses/minute). With a valid <code>X-API-Key</code>: the per-IP limit is skipped. Responses are cached server-side (~5&nbsp;min) so repeat lookups are instant and don't count against limits. Requests to private/internal addresses are rejected (403).</p>
+
+    <h2 id="endpoints">Endpoints</h2>
+    <p>Every endpoint below is <span class="method post">POST</span> with body <code>{ "domain": "&lt;host&gt;" }</code>.</p>
+    <table>
+      <tr><th>Path</th><th>Returns</th></tr>
+      <tr><td>/api/dns-lookup</td><td>A/AAAA/MX/TXT/NS/CNAME/SOA/CAA/SRV records + insights</td></tr>
+      <tr><td>/api/whois</td><td>WHOIS / RDAP registration data</td></tr>
+      <tr><td>/api/ssl</td><td>Certificate, chain, protocols, ciphers, vulnerabilities, grade</td></tr>
+      <tr><td>/api/security-headers</td><td>HTTP security header analysis</td></tr>
+      <tr><td>/api/dnssec</td><td>DNSSEC configuration &amp; chain of trust</td></tr>
+      <tr><td>/api/blacklist-check</td><td>DNSBL reputation across major lists</td></tr>
+      <tr><td>/api/propagation</td><td>Global DNS propagation across resolvers</td></tr>
+      <tr><td>/api/email-security</td><td>SPF, DKIM, DMARC, BIMI analysis &amp; score</td></tr>
+      <tr><td>/api/geoip</td><td>IP geolocation &amp; network info</td></tr>
+      <tr><td>/api/port-scan</td><td>Common-port reachability scan</td></tr>
+      <tr><td>/api/http</td><td>HTTP/2/3, headers, redirects, features</td></tr>
+      <tr><td>/api/tech</td><td>Technology / stack fingerprinting</td></tr>
+      <tr><td>/api/cert-transparency</td><td>Certificate Transparency log entries</td></tr>
+      <tr><td>/api/subdomain-takeover</td><td>Dangling-CNAME takeover checks</td></tr>
+      <tr><td>/api/typosquat</td><td>Registered look-alike domains</td></tr>
+      <tr><td>/api/mta-sts</td><td>MTA-STS &amp; DANE</td></tr>
+      <tr><td>/api/hsts-preload</td><td>HSTS preload eligibility</td></tr>
+      <tr><td>/api/ipv6</td><td>IPv6 reachability</td></tr>
+    </table>
+
+    <h2 id="badge">Status badge</h2>
+    <p>Embed a live security-grade badge in your README — it recomputes on each load:</p>
+    <pre><span class="method get">GET</span> <span class="ep">/api/badge/&lt;domain&gt;.svg</span>
+
+[![HetOps DNS](https://dns.hetops.dev/api/badge/github.com.svg)](https://dns.hetops.dev/?domain=github.com)</pre>
+    <div class="card"><img src="/api/badge/github.com.svg" alt="badge example" height="20"> &nbsp;<span style="color:var(--faint);font-size:12px">live example</span></div>
+
+    <h2 id="errors">Errors</h2>
+    <p>Errors return a JSON body <code>{ "error": "message" }</code> with an appropriate status: <code>400</code> invalid domain, <code>403</code> blocked/internal host, <code>429</code> rate limited, <code>500</code> lookup failed.</p>
+  </div>
+
+  <footer>HetOps DNS Intelligence · <a href="/">app</a> · <a href="https://hetops.dev">hetops.dev</a></footer>
+</body>
+</html>

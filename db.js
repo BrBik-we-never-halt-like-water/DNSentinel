@@ -57,7 +57,21 @@ db.exec(`
     UNIQUE(user_id, domain),
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS api_keys (
+    key        TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    label      TEXT,
+    created_at INTEGER NOT NULL,
+    last_used  INTEGER,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
+
+// Lightweight migrations for columns added after initial release (ignore if present).
+for (const col of ['webhook_url TEXT', 'digest_enabled INTEGER DEFAULT 0', 'last_digest INTEGER']) {
+  try { db.exec(`ALTER TABLE users ADD COLUMN ${col}`); } catch { /* already exists */ }
+}
 
 const now = () => Date.now();
 const newId = (bytes = 32) => crypto.randomBytes(bytes).toString('hex');
@@ -129,7 +143,7 @@ const _insAlert = db.prepare(`INSERT INTO alerts (user_id, domain, email_enabled
   VALUES (?, ?, ?, ?) ON CONFLICT(user_id, domain) DO UPDATE SET email_enabled = excluded.email_enabled`);
 const _listAlertsForUser = db.prepare('SELECT id, domain, email_enabled, last_state, last_checked FROM alerts WHERE user_id = ? ORDER BY created_at DESC');
 const _delAlert = db.prepare('DELETE FROM alerts WHERE user_id = ? AND domain = ?');
-const _allAlerts = db.prepare('SELECT a.id, a.user_id, a.domain, a.email_enabled, a.last_state, u.email FROM alerts a JOIN users u ON u.id = a.user_id');
+const _allAlerts = db.prepare('SELECT a.id, a.user_id, a.domain, a.email_enabled, a.last_state, u.email, u.webhook_url FROM alerts a JOIN users u ON u.id = a.user_id');
 const _updAlertState = db.prepare('UPDATE alerts SET last_state = ?, last_checked = ? WHERE id = ?');
 function addAlert(userId, domain, emailEnabled = 1) {
   _insAlert.run(userId, domain, emailEnabled ? 1 : 0, now());
@@ -144,10 +158,40 @@ function removeAlert(userId, domain) { _delAlert.run(userId, domain); }
 function allAlerts() {
   return _allAlerts.all().map(a => ({
     id: a.id, userId: a.user_id, domain: a.domain,
-    emailEnabled: !!a.email_enabled, email: a.email, last: safeParse(a.last_state),
+    emailEnabled: !!a.email_enabled, email: a.email, webhookUrl: a.webhook_url || null,
+    last: safeParse(a.last_state),
   }));
 }
 function updateAlertState(id, stateObj) { _updAlertState.run(JSON.stringify(stateObj || {}), now(), id); }
+
+// ── User settings (webhook, digest) ──
+const _getUser = db.prepare('SELECT id, email, webhook_url, digest_enabled, last_digest FROM users WHERE id = ?');
+const _setWebhook = db.prepare('UPDATE users SET webhook_url = ? WHERE id = ?');
+const _setDigest = db.prepare('UPDATE users SET digest_enabled = ? WHERE id = ?');
+const _setLastDigest = db.prepare('UPDATE users SET last_digest = ? WHERE id = ?');
+const _digestUsers = db.prepare('SELECT id, email, last_digest FROM users WHERE digest_enabled = 1');
+function getUser(id) { return _getUser.get(id); }
+function setWebhook(id, url) { _setWebhook.run(url || null, id); }
+function setDigest(id, on) { _setDigest.run(on ? 1 : 0, id); }
+function markDigestSent(id) { _setLastDigest.run(now(), id); }
+function digestUsers() { return _digestUsers.all(); }
+
+// ── API keys ──
+const _insApiKey = db.prepare('INSERT INTO api_keys (key, user_id, label, created_at) VALUES (?, ?, ?, ?)');
+const _listApiKeys = db.prepare('SELECT key, label, created_at, last_used FROM api_keys WHERE user_id = ? ORDER BY created_at DESC');
+const _delApiKey = db.prepare('DELETE FROM api_keys WHERE user_id = ? AND key = ?');
+const _apiKeyOwner = db.prepare('SELECT user_id FROM api_keys WHERE key = ?');
+const _apiKeyExists = db.prepare('SELECT 1 AS ok FROM api_keys WHERE key = ?');
+const _touchApiKey = db.prepare('UPDATE api_keys SET last_used = ? WHERE key = ?');
+function apiKeyExists(key) { return key ? !!_apiKeyExists.get(key) : false; }
+function createApiKey(userId, label) {
+  const key = 'hk_' + newId(20);
+  _insApiKey.run(key, userId, (label || '').slice(0, 60), now());
+  return key;
+}
+function listApiKeys(userId) { return _listApiKeys.all(userId); }
+function deleteApiKey(userId, key) { _delApiKey.run(userId, key); }
+function apiKeyUser(key) { const r = _apiKeyOwner.get(key); if (r) { _touchApiKey.run(now(), key); return r.user_id; } return null; }
 
 // Periodic cleanup of expired tokens/sessions.
 const _gcTokens = db.prepare('DELETE FROM login_tokens WHERE expires_at < ?');
@@ -164,4 +208,6 @@ module.exports = {
   createSession, getSession, destroySession,
   addHistory, listHistory, clearHistory,
   addAlert, listAlerts, removeAlert, allAlerts, updateAlertState,
+  getUser, setWebhook, setDigest, markDigestSent, digestUsers,
+  createApiKey, listApiKeys, deleteApiKey, apiKeyUser, apiKeyExists,
 };

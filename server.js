@@ -303,11 +303,15 @@ app.set('trust proxy', 2);
 // A single full analysis fans out ~28 API calls. Limits are sized so a user can
 // run ~20 back-to-back analyses per minute before throttling kicks in, while
 // still protecting the server from abuse. Cache hits (below) bypass these.
+// Requests authenticated with a valid API key skip the shared IP rate limits.
+const hasValidApiKey = (req) => { try { return store.apiKeyExists(req.get('X-API-Key')); } catch { return false; } };
+
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 1500,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: hasValidApiKey,
   message: { error: 'Too many requests. Please retry in a minute.' }
 });
 
@@ -316,6 +320,7 @@ const heavyApiLimiter = rateLimit({
   max: 600,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: hasValidApiKey,
   message: { error: 'Rate limit exceeded for intensive checks. Please slow down.' }
 });
 
@@ -4096,6 +4101,42 @@ app.delete('/api/alerts/:domain', requireAuth, (req, res) => {
   res.json({ ok: true, alerts: store.listAlerts(req.user.id) });
 });
 
+// ── User settings (webhook URL + weekly digest) ──
+app.get('/api/settings', requireAuth, (req, res) => {
+  const u = store.getUser(req.user.id) || {};
+  res.json({ webhookUrl: u.webhook_url || '', digestEnabled: !!u.digest_enabled });
+});
+app.post('/api/settings', requireAuth, async (req, res) => {
+  const { webhookUrl, digestEnabled } = req.body || {};
+  if (webhookUrl !== undefined) {
+    const url = String(webhookUrl || '').trim();
+    if (url) {
+      let u;
+      try { u = new URL(url); } catch { return res.status(400).json({ error: 'Invalid webhook URL' }); }
+      if (!/^https?:$/.test(u.protocol)) return res.status(400).json({ error: 'Webhook must be http(s)' });
+      if (await hostIsBlocked(u.hostname)) return res.status(400).json({ error: 'Webhook host not permitted' });
+    }
+    store.setWebhook(req.user.id, url);
+  }
+  if (digestEnabled !== undefined) store.setDigest(req.user.id, !!digestEnabled);
+  const u = store.getUser(req.user.id) || {};
+  res.json({ ok: true, webhookUrl: u.webhook_url || '', digestEnabled: !!u.digest_enabled });
+});
+
+// ── API keys ──
+app.get('/api/keys', requireAuth, (req, res) => {
+  res.json({ keys: store.listApiKeys(req.user.id) });
+});
+app.post('/api/keys', requireAuth, (req, res) => {
+  if (store.listApiKeys(req.user.id).length >= 10) return res.status(400).json({ error: 'Key limit reached (10)' });
+  const key = store.createApiKey(req.user.id, req.body?.label || 'API key');
+  res.json({ ok: true, key, keys: store.listApiKeys(req.user.id) });
+});
+app.delete('/api/keys/:key', requireAuth, (req, res) => {
+  store.deleteApiKey(req.user.id, req.params.key || '');
+  res.json({ ok: true, keys: store.listApiKeys(req.user.id) });
+});
+
 // ── Alert scheduler ────────────────────────────────────────────
 // Periodically re-checks every watched domain by calling our own endpoints
 // (reusing all logic + the response cache), diffs against the last stored state,
@@ -4109,11 +4150,21 @@ async function internalLookup(endpoint, domain) {
     return await r.json();
   } catch { return { error: true }; }
 }
+// Parse the registry expiry date out of raw WHOIS text → days remaining (or null).
+function parseWhoisExpiryDays(whois) {
+  if (!whois || whois.error || !whois.rawData) return null;
+  const m = whois.rawData.match(/(?:registry expiry date|registrar registration expiration date|expir(?:y|ation) date|paid-till|renewal date)\s*:\s*([0-9TZ:.\-\/ ]+)/i);
+  if (!m) return null;
+  const t = Date.parse(m[1].trim());
+  if (isNaN(t)) return null;
+  return Math.floor((t - Date.now()) / 86400000);
+}
 async function checkDomainStatus(domain) {
-  const [ssl, bl, dnsRes] = await Promise.all([
+  const [ssl, bl, dnsRes, whois] = await Promise.all([
     internalLookup('ssl', domain),
     internalLookup('blacklist-check', domain),
     internalLookup('dns-lookup', domain),
+    internalLookup('whois', domain),
   ]);
   // null (not []) when the lookup failed, so a transient failure is distinguishable
   // from a genuine "no records" result and never triggers a false "changed" alert.
@@ -4122,6 +4173,7 @@ async function checkDomainStatus(domain) {
     sslDays: (!ssl.error) ? (ssl.certificate?.daysRemaining ?? null) : null,
     grade: (!ssl.error) ? (ssl.grade?.letter || null) : null,
     blacklisted: (!bl.error && bl.results) ? bl.results.some(r => r.listed) : null,
+    whoisDays: parseWhoisExpiryDays(whois),
     aRecords,
   };
 }
@@ -4132,12 +4184,28 @@ function diffStatus(prev, cur) {
     for (const t of [7, 30, 90]) if (prev.sslDays > t && cur.sslDays <= t) ch.push(`Certificate now within ${t} days of expiry (${cur.sslDays}d left)`);
     if (prev.sslDays > 0 && cur.sslDays <= 0) ch.push('Certificate has expired');
   }
+  if (prev.whoisDays != null && cur.whoisDays != null) {
+    for (const t of [7, 30]) if (prev.whoisDays > t && cur.whoisDays <= t) ch.push(`Domain registration expires in ${cur.whoisDays} days`);
+    if (prev.whoisDays > 0 && cur.whoisDays <= 0) ch.push('Domain registration has EXPIRED');
+  }
   if (prev.blacklisted === false && cur.blacklisted === true) ch.push('Domain is now blacklisted');
   if (prev.blacklisted === true && cur.blacklisted === false) ch.push('Domain removed from blacklists');
   if (prev.aRecords && cur.aRecords && prev.aRecords.join(',') !== cur.aRecords.join(',') && (prev.aRecords.length || cur.aRecords.length))
     ch.push(`A record changed: ${prev.aRecords.join(', ') || '∅'} → ${cur.aRecords.join(', ') || '∅'}`);
   if (prev.grade && cur.grade && prev.grade !== cur.grade) ch.push(`TLS grade changed ${prev.grade} → ${cur.grade}`);
   return ch;
+}
+// Deliver an alert to a Slack/Discord/generic webhook (SSRF-guarded).
+async function sendWebhook(url, domain, changes) {
+  try {
+    const u = new URL(url);
+    if (!/^https?:$/.test(u.protocol) || await hostIsBlocked(u.hostname)) return;
+    const text = `*HetOps DNS* — changes for ${domain}:\n` + changes.map((c) => '• ' + c).join('\n');
+    await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, content: text, domain, changes }), // text=Slack, content=Discord
+    });
+  } catch (e) { console.error('webhook failed:', e.message); }
 }
 let alertRunning = false;
 async function runAlertChecks() {
@@ -4157,12 +4225,16 @@ async function runAlertChecks() {
         sslDays: cur.sslDays != null ? cur.sslDays : (prev.sslDays ?? null),
         grade: cur.grade != null ? cur.grade : (prev.grade ?? null),
         blacklisted: cur.blacklisted != null ? cur.blacklisted : (prev.blacklisted ?? null),
+        whoisDays: cur.whoisDays != null ? cur.whoisDays : (prev.whoisDays ?? null),
         aRecords: cur.aRecords != null ? cur.aRecords : (prev.aRecords ?? null),
       };
       store.updateAlertState(a.id, merged);
-      if (changes.length && a.emailEnabled) {
-        try { await mailer.sendAlertEmail(a.email, a.domain, changes); }
-        catch (e) { console.error('alert email failed:', e.message); }
+      if (changes.length) {
+        if (a.emailEnabled) {
+          try { await mailer.sendAlertEmail(a.email, a.domain, changes); }
+          catch (e) { console.error('alert email failed:', e.message); }
+        }
+        if (a.webhookUrl) await sendWebhook(a.webhookUrl, a.domain, changes);
       }
     }
   } catch (e) {
@@ -4173,6 +4245,42 @@ async function runAlertChecks() {
 }
 const ALERT_INTERVAL_MS = Number(process.env.ALERT_INTERVAL_MS) || 30 * 60 * 1000;
 setInterval(runAlertChecks, ALERT_INTERVAL_MS).unref();
+
+// ── Weekly digest ──────────────────────────────────────────────
+// Hourly tick; emails each opted-in user a summary at most once every 7 days.
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+let digestRunning = false;
+async function runDigests() {
+  if (digestRunning) return;
+  digestRunning = true;
+  try {
+    for (const u of store.digestUsers()) {
+      if (u.last_digest && Date.now() - u.last_digest < WEEK_MS) continue;
+      const alerts = store.listAlerts(u.id);
+      if (!alerts.length) { store.markDigestSent(u.id); continue; }
+      const rows = alerts.map((a) => {
+        const s = a.last || {};
+        const parts = [];
+        if (s.grade) parts.push(`TLS ${s.grade}`);
+        if (s.sslDays != null) parts.push(`cert ${s.sslDays}d`);
+        if (s.whoisDays != null) parts.push(`domain ${s.whoisDays}d`);
+        if (s.blacklisted != null) parts.push(s.blacklisted ? 'BLACKLISTED' : 'not blacklisted');
+        return { domain: a.domain, summary: parts.join(' · ') || 'not checked yet' };
+      });
+      try { await mailer.sendDigest(u.email, rows); store.markDigestSent(u.id); }
+      catch (e) { console.error('digest failed:', e.message); }
+    }
+  } catch (e) {
+    console.error('digest run error:', e.message);
+  } finally {
+    digestRunning = false;
+  }
+}
+setInterval(runDigests, 60 * 60 * 1000).unref();
+
+app.get('/docs', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'docs.html'));
+});
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
