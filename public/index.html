@@ -20,6 +20,7 @@
   <meta name="twitter:card" content="summary_large_image">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,600;0,700;1,800;1,900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+  <script src="/shared/health-score.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -49,8 +50,8 @@
       --border-glow:rgba(6,182,212,0.22);
       --text:       #f1f5f9;
       --text-dim:   rgba(241,245,249,0.65);
-      --text-muted: rgba(241,245,249,0.42);
-      --text-faint: rgba(241,245,249,0.2);
+      --text-muted: rgba(241,245,249,0.58);
+      --text-faint: rgba(241,245,249,0.36);
     }
 
     html { scroll-behavior: smooth; color-scheme: dark; }
@@ -390,6 +391,11 @@
       background: var(--bg-card);
       position: relative; overflow: hidden;
     }
+    /* stat cards are buttons — reset native button styling and deep-link on click */
+    button.stat-card { display: block; width: 100%; text-align: left; font: inherit; color: inherit;
+      cursor: pointer; transition: border-color .15s, transform .12s; }
+    button.stat-card:hover { border-color: var(--accent-border); transform: translateY(-2px); }
+    button.stat-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .stat-card::after {
       content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
       opacity: 0.7;
@@ -624,12 +630,16 @@
 
     /* ══ TAB HEALTH DOTS ════════════════════════════════════════ */
     .tab-health {
-      width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
       display: none; margin-left: 2px;
     }
+    /* status is also conveyed by SHAPE, not colour alone: ok = filled dot,
+       warn = hollow ring, err = filled ring — so it survives colour-blindness. */
     .tab-health.ok   { display:block; background:var(--ok);   box-shadow:0 0 5px rgba(34,197,94,.7); }
-    .tab-health.warn { display:block; background:var(--warn);  box-shadow:0 0 5px rgba(245,158,11,.7); }
-    .tab-health.err  { display:block; background:var(--err);   box-shadow:0 0 5px rgba(239,68,68,.7); }
+    .tab-health.warn { display:block; background:transparent; border:2px solid var(--warn); box-shadow:0 0 5px rgba(245,158,11,.5); }
+    .tab-health.err  { display:block; background:var(--err);  border:2px solid #7f1d1d; box-shadow:0 0 6px rgba(239,68,68,.8); }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
+      clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 
     /* ══ SEARCH HISTORY ══════════════════════════════════════════ */
     /* High stacking context so the history dropdown sits above the example chips /
@@ -834,6 +844,103 @@
     .scorecard.sc-loading b { color: var(--text-dim); font-weight: 600; }
     .sc-badge-row { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }
     .sc-badge-lbl { font-size: 11px; color: var(--text-faint); }
+    .sc-item-actions { display: flex; gap: 6px; flex-shrink: 0; align-self: center; }
+    .sc-item-fix { font-size: 12px; color: var(--text-dim); margin-top: 5px; line-height: 1.5;
+      padding: 6px 10px; background: rgba(255,255,255,.03); border-radius: 8px; }
+    .sc-fix-lbl { font-weight: 700; color: var(--accent); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; margin-right: 4px; }
+    /* Top-3 actions callout */
+    .sc-top3 { margin: 4px 0 12px; padding: 14px; border: 1px solid var(--border); border-radius: 12px;
+      background: rgba(255,255,255,.02); display: flex; flex-direction: column; gap: 10px; }
+    .sc-top3-title { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-faint); }
+    .sc-top3-item { display: flex; align-items: flex-start; gap: 12px; }
+    .sc-top3-num { width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; margin-top: 1px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 800; color: var(--brand);
+      background: var(--brand-subtle); border: 1px solid var(--brand-border); }
+    /* Collapsed passed-checks list */
+    .sc-passed { margin-top: 10px; }
+    .sc-passed summary { cursor: pointer; font-size: 12px; color: var(--ok); padding: 6px 2px;
+      list-style: none; display: inline-flex; align-items: center; gap: 6px; }
+    .sc-passed summary::before { content: '▸'; font-size: 10px; transition: transform .15s; }
+    .sc-passed[open] summary::before { transform: rotate(90deg); }
+    .sc-passed summary::-webkit-details-marker { display: none; }
+    .sc-passed .sc-list { margin-top: 8px; }
+    .sc-allclear { font-size: 13px; color: var(--ok); padding: 10px 12px; margin-bottom: 6px;
+      background: rgba(34,197,94,.06); border: 1px solid rgba(34,197,94,.2); border-radius: 10px; }
+
+    /* ══ PLAIN-LANGUAGE EXPLAINERS ═══════════════════════════════ */
+    details.explain { margin: 0 0 12px; }
+    details.explain summary {
+      cursor: pointer; font-size: 12px; color: var(--text-muted); padding: 4px 2px;
+      list-style: none; display: inline-flex; align-items: center; gap: 7px; user-select: none;
+    }
+    details.explain summary::-webkit-details-marker { display: none; }
+    details.explain summary::before { content: '?'; width: 16px; height: 16px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+      font-size: 10px; font-weight: 700; color: var(--text-muted);
+      border: 1px solid var(--border); background: rgba(255,255,255,.03); }
+    details.explain summary:hover { color: var(--text-dim); }
+    details.explain .explain-hint { font-size: 10px; color: var(--text-faint); border: 1px solid var(--border);
+      border-radius: 5px; padding: 1px 6px; }
+    details.explain[open] .explain-hint { display: none; }
+    details.explain .explain-body {
+      margin: 8px 0 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 11px;
+      background: rgba(255,255,255,.02); font-size: 12.5px; line-height: 1.6; color: var(--text-dim);
+      display: flex; flex-direction: column; gap: 6px; max-width: 720px;
+    }
+    details.explain .explain-why { font-weight: 700; color: var(--warn); }
+    details.explain .explain-expert { font-size: 11.5px; color: var(--text-faint); font-family: 'JetBrains Mono', monospace; }
+
+    /* ══ SCORE BREAKDOWN ═════════════════════════════════════════ */
+    .score-breakdown { margin-bottom: 18px; padding: 18px 20px; }
+    .sb-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+      flex-wrap: wrap; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+    .sb-head > span:first-child { font-size: 14px; font-weight: 700; }
+    .sb-total { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+    .sb-sec { margin-bottom: 12px; }
+    .sb-sec-head { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700;
+      color: var(--text-dim); margin-bottom: 6px; }
+    .sb-sec-pts { font-family: 'JetBrains Mono', monospace; color: var(--text-muted); }
+    .sb-row { display: flex; align-items: center; gap: 10px; padding: 5px 0 5px 8px; }
+    .sb-ico { flex-shrink: 0; font-size: 13px; width: 14px; text-align: center; }
+    .sb-lbl { flex: 1; font-size: 12.5px; color: var(--text-dim); }
+    .sb-pts { flex-shrink: 0; font-size: 11px; font-family: 'JetBrains Mono', monospace;
+      color: var(--text-muted); background: none; border: 1px solid var(--border); border-radius: 6px;
+      padding: 2px 8px; cursor: pointer; transition: all .15s; }
+    .sb-pts:hover { color: var(--accent); border-color: var(--accent-border); }
+    .sb-foot { font-size: 11.5px; color: var(--text-faint); margin-top: 12px; padding-top: 12px;
+      border-top: 1px solid var(--border); line-height: 1.5; }
+
+    /* ══ OVERVIEW LANDING ════════════════════════════════════════ */
+    .ov-card { padding: 22px 24px; }
+    .ov-top { display: flex; align-items: center; gap: 22px; padding-bottom: 20px; margin-bottom: 18px;
+      border-bottom: 1px solid var(--border); }
+    .ov-grade { flex-shrink: 0; text-align: center; cursor: pointer; padding: 10px 18px;
+      border: 1px solid var(--border); border-radius: 14px; background: rgba(255,255,255,.02); transition: all .15s; }
+    .ov-grade:hover { background: rgba(255,255,255,.04); border-color: var(--accent-border); }
+    .ov-grade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .ov-grade-letter { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 900; font-size: 46px; line-height: 1; }
+    .ov-grade-pct { font-size: 15px; font-weight: 700; margin-top: 4px; }
+    .ov-grade-pct span { font-size: 11px; color: var(--text-faint); font-weight: 400; }
+    .ov-grade-hint { font-size: 10px; color: var(--text-faint); margin-top: 6px; text-decoration: underline; }
+    .ov-verdict { font-size: 17px; line-height: 1.5; font-weight: 600; }
+    .ov-verdict.err { color: #fca5a5; } .ov-verdict.warn { color: #fcd34d; }
+    .ov-verdict.ok { color: #86efac; } .ov-verdict.muted { color: var(--text-muted); }
+    .ov-cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
+    .ov-cat { display: flex; align-items: center; gap: 11px; text-align: left; width: 100%;
+      padding: 12px 14px; border-radius: 11px; background: rgba(255,255,255,.02);
+      border: 1px solid var(--border); cursor: pointer; transition: all .15s; }
+    .ov-cat:hover { background: rgba(255,255,255,.04); border-color: var(--accent-border); }
+    .ov-cat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .ov-cat-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .ov-cat-dot.ok { background: var(--ok); } .ov-cat-dot.warn { background: var(--warn); } .ov-cat-dot.err { background: var(--err); }
+    .ov-cat-name { font-size: 13px; font-weight: 600; }
+    .ov-cat-sum { flex: 1; font-size: 12px; color: var(--text-muted); text-align: right; }
+    .ov-cat-arrow { color: var(--text-faint); font-size: 13px; }
+    /* live per-category issue counts on the tab strip */
+    .cat-count.has-issues { color: var(--warn); background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.3); }
+    .cat-count.clean { color: var(--ok); background: rgba(34,197,94,.1); border-color: rgba(34,197,94,.28); }
+    @media (max-width: 640px){ .ov-top { flex-direction: column; align-items: flex-start; gap: 14px; } .ov-verdict { font-size: 15px; } }
 
     /* ══ COMPARE & HISTORY ═══════════════════════════════════════ */
     .hero-tools { display: flex; justify-content: center; margin-top: 18px;
@@ -1090,8 +1197,9 @@
       html, body { background: #050514 !important; color: var(--text) !important; }
       /* Hide all interactive chrome — keep only the report content */
       .nav, .navbar, .footer, .hero, .toast-stack, .cmp-overlay, .mobile-nav-overlay,
-      .hdr-actions, .copy-btn, .sc-view, .mon-remove,
+      .hdr-actions, .copy-btn, .sc-view, .mon-remove, details.explain, .ov-cat-arrow,
       .tabs-wrap > .cat-tabs, .tabs-wrap > .sub-tabs-wrap { display: none !important; }
+      details.explain { display: none !important; }
       .bg-scene { display: none !important; }
       .tabs-wrap { background: transparent !important; border: none !important; overflow: visible !important; }
       .container { max-width: 100% !important; padding: 0 !important; }
@@ -1148,7 +1256,7 @@
         <span class="nav-acct" id="navAcct">
           <button class="nav-signin" id="navSignin" onclick="openLogin()">Sign in</button>
         </span>
-        <button class="nav-mobile-btn" id="mobileNavBtn" aria-label="Open navigation" onclick="document.getElementById('mobileNavOverlay').classList.add('open')">
+        <button class="nav-mobile-btn" id="mobileNavBtn" aria-label="Open navigation" aria-expanded="false" onclick="openMobileNav()">
           <i data-lucide="menu"></i>
         </button>
       </div>
@@ -1162,7 +1270,7 @@
     <div class="logo-wordmark" style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:900;font-style:italic;font-size:22px;letter-spacing:-0.5px">
       <span style="color:var(--text)">HET</span><span style="color:var(--brand);text-shadow:0 0 20px var(--brand-glow)">OPS_</span>
     </div>
-    <button class="mobile-nav-close" aria-label="Close navigation" onclick="document.getElementById('mobileNavOverlay').classList.remove('open')">
+    <button class="mobile-nav-close" aria-label="Close navigation" onclick="closeMobileNav()">
       <i data-lucide="x"></i>
     </button>
   </div>
@@ -1217,7 +1325,9 @@
         <div class="domain-chips" id="domainChips"></div>
       </div>
       <div class="domain-hdr-right">
-        <div class="score-wrap">
+        <div class="score-wrap" onclick="toggleScoreBreakdown()" role="button" tabindex="0"
+          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleScoreBreakdown();}"
+          title="Click to see how the grade is calculated" style="cursor:pointer">
           <svg class="score-svg" viewBox="0 0 88 88">
             <circle cx="44" cy="44" r="37" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="5.5"/>
             <circle id="scoreArc" cx="44" cy="44" r="37" fill="none"
@@ -1252,24 +1362,27 @@
       </div>
     </div>
 
+    <!-- Score breakdown (toggled by clicking the score ring) -->
+    <div id="scoreBreakdown" class="card score-breakdown" style="display:none"></div>
+
     <!-- Stats -->
     <div class="stats-row">
-      <div class="card stat-card">
+      <button class="card stat-card" onclick="deepLinkTab('dns')" title="View DNS records">
         <div class="stat-lbl">DNS Records</div>
         <div class="skel stat-val" id="sDns" style="height:26px;width:44px"></div>
-      </div>
-      <div class="card stat-card">
+      </button>
+      <button class="card stat-card" onclick="deepLinkTab('ssl')" title="View SSL/TLS analysis">
         <div class="stat-lbl">SSL Certificate</div>
         <div class="skel stat-val" id="sSsl" style="height:26px;width:76px"></div>
-      </div>
-      <div class="card stat-card">
+      </button>
+      <button class="card stat-card" onclick="deepLinkTab('emailsec')" title="View email authentication">
         <div class="stat-lbl">Email Security</div>
         <div class="skel stat-val" id="sEmail" style="height:26px;width:68px"></div>
-      </div>
-      <div class="card stat-card">
+      </button>
+      <button class="card stat-card" onclick="deepLinkTab('security')" title="View blacklist &amp; security overview">
         <div class="stat-lbl">Blacklist</div>
         <div class="skel stat-val" id="sBl" style="height:26px;width:68px"></div>
-      </div>
+      </button>
     </div>
 
     <!-- Security Scorecard (executive summary) -->
@@ -1279,28 +1392,34 @@
     <div class="tabs-wrap">
       <!-- Category row -->
       <div class="cat-tabs">
-        <button class="cat-tab active" id="cat-core"          data-cat="core"          onclick="selectCat('core')">
-          <i class="cat-icon" data-lucide="search"></i><span class="cat-label">Core</span><span class="cat-count">4</span><span class="tab-health" id="health-core"></span>
+        <button class="cat-tab active" id="cat-overview"      data-cat="overview"      onclick="selectCat('overview')">
+          <i class="cat-icon" data-lucide="layout-dashboard"></i><span class="cat-label">Overview</span><span class="tab-health" id="health-overview"></span>
+        </button>
+        <button class="cat-tab"        id="cat-core"          data-cat="core"          onclick="selectCat('core')">
+          <i class="cat-icon" data-lucide="search"></i><span class="cat-label">Core</span><span class="cat-count" id="count-core">4</span><span class="tab-health" id="health-core"></span>
         </button>
         <button class="cat-tab"        id="cat-security"      data-cat="security"      onclick="selectCat('security')">
-          <i class="cat-icon" data-lucide="shield"></i><span class="cat-label">Security</span><span class="cat-count">9</span><span class="tab-health" id="health-security"></span>
+          <i class="cat-icon" data-lucide="shield"></i><span class="cat-label">Security</span><span class="cat-count" id="count-security">9</span><span class="tab-health" id="health-security"></span>
         </button>
         <button class="cat-tab"        id="cat-email"         data-cat="email"         onclick="selectCat('email')">
-          <i class="cat-icon" data-lucide="mail"></i><span class="cat-label">Email</span><span class="cat-count">3</span><span class="tab-health" id="health-email"></span>
+          <i class="cat-icon" data-lucide="mail"></i><span class="cat-label">Email</span><span class="cat-count" id="count-email">3</span><span class="tab-health" id="health-email"></span>
         </button>
         <button class="cat-tab"        id="cat-network"       data-cat="network"       onclick="selectCat('network')">
-          <i class="cat-icon" data-lucide="network"></i><span class="cat-label">Network</span><span class="cat-count">3</span><span class="tab-health" id="health-network"></span>
+          <i class="cat-icon" data-lucide="network"></i><span class="cat-label">Network</span><span class="cat-count" id="count-network">3</span><span class="tab-health" id="health-network"></span>
         </button>
         <button class="cat-tab"        id="cat-web"           data-cat="web"           onclick="selectCat('web')">
-          <i class="cat-icon" data-lucide="monitor"></i><span class="cat-label">Web</span><span class="cat-count">5</span><span class="tab-health" id="health-web"></span>
+          <i class="cat-icon" data-lucide="monitor"></i><span class="cat-label">Web</span><span class="cat-count" id="count-web">5</span><span class="tab-health" id="health-web"></span>
         </button>
         <button class="cat-tab"        id="cat-intelligence"  data-cat="intelligence"  onclick="selectCat('intelligence')">
-          <i class="cat-icon" data-lucide="eye"></i><span class="cat-label">Intelligence</span><span class="cat-count">2</span><span class="tab-health" id="health-intelligence"></span>
+          <i class="cat-icon" data-lucide="eye"></i><span class="cat-label">Intelligence</span><span class="cat-count" id="count-intelligence">2</span><span class="tab-health" id="health-intelligence"></span>
         </button>
       </div>
       <!-- Sub-tabs row -->
       <div class="sub-tabs-wrap">
-        <div class="sub-tabs-group" id="cat-core-tabs">
+        <div class="sub-tabs-group" id="cat-overview-tabs">
+          <button class="tab-btn active" id="tab-overview"    onclick="tab('overview')"><i class="tab-icon" data-lucide="layout-dashboard"></i>Summary</button>
+        </div>
+        <div class="sub-tabs-group" id="cat-core-tabs" style="display:none">
           <button class="tab-btn active" id="tab-dns"          onclick="tab('dns')"><i class="tab-icon" data-lucide="search"></i>DNS</button>
           <button class="tab-btn"        id="tab-whois"        onclick="tab('whois')"><i class="tab-icon" data-lucide="file-text"></i>WHOIS</button>
           <button class="tab-btn"        id="tab-geoip"        onclick="tab('geoip')"><i class="tab-icon" data-lucide="map-pin"></i>GeoIP</button>
@@ -1341,7 +1460,12 @@
       </div>
     </div>
 
-    <div id="pane-dns">
+    <div id="pane-overview">
+      <div id="overviewContent">
+        <div class="card"><div class="load-box pulse-anim"><div class="load-spinner"></div>Building overview…</div></div>
+      </div>
+    </div>
+    <div id="pane-dns" style="display:none">
       <div class="dns-grid" id="dnsGrid">
         <div class="card" style="grid-column:1/-1">
           <div class="load-box pulse-anim"><div class="load-spinner"></div>Resolving DNS records…</div>
@@ -1590,6 +1714,142 @@ const TC = {
 };
 function tc(type){ return TC[type]||{bg:'rgba(255,255,255,.07)',bd:'rgba(255,255,255,.2)',fg:'#f1f5f9'}; }
 
+// ── Plain-language explainers ──────────────────────────────────
+// One entry per result tab: what the check is, why a non-expert should care,
+// and a one-line expert note. Rendered as a quiet <details> above each pane.
+const EXPLAIN = {
+  dns: { title:'DNS records',
+    what:'DNS records are the address book of your domain — they tell the internet where your website, email and other services live.',
+    why:'Wrong or missing records mean visitors can’t reach your site or your email silently breaks.',
+    expert:'Shows A/AAAA/MX/TXT/NS/CNAME/SOA/CAA/SRV/PTR from the selected resolver profile.' },
+  whois: { title:'WHOIS / registration',
+    what:'The public registration record for the domain: who registered it, through which registrar, and when it expires.',
+    why:'If the registration lapses, the domain can be lost or bought by someone else — expiry is the single most catastrophic thing to miss.',
+    expert:'RDAP is queried first (structured data), with legacy WHOIS as fallback.' },
+  geoip: { title:'GeoIP',
+    what:'Where in the world the server behind this domain is located, and which network/company operates it.',
+    why:'Useful for latency, data-residency and spotting unexpected hosting changes.',
+    expert:'Resolves the first A record and looks it up via ipwho.is.' },
+  propagation: { title:'DNS propagation',
+    what:'Checks whether major public DNS resolvers around the world all return the same answer for this domain.',
+    why:'After you change DNS, some visitors can be sent to the old server for hours. Inconsistent answers can also indicate hijacking.',
+    expert:'Queries Google, Cloudflare, Quad9, OpenDNS, Comodo, Level3, Verisign in parallel.' },
+  ssl: { title:'SSL/TLS',
+    what:'The certificate and encryption settings that put the padlock in the browser and keep traffic private.',
+    why:'An expired certificate takes your site down with a scary browser warning; weak settings let attackers eavesdrop or tamper.',
+    expert:'SSL-Labs-style grading: protocol support (SSLv3→TLS1.3), cipher/PFS analysis, chain validation with AIA fetching, known-vuln checks.' },
+  security: { title:'the security overview',
+    what:'A quick pass/fail across the most fundamental protections: SPF, DMARC, CAA, MX and blacklist status.',
+    why:'These five basics stop the most common real-world attacks: email spoofing and rogue certificates.',
+    expert:'Derived from DNS insights + DNSBL results; the deeper per-topic tabs have full detail.' },
+  headers: { title:'security headers',
+    what:'Extra instructions your website sends browsers, telling them to block common attack techniques.',
+    why:'They are free, one-line protections against clickjacking, content-sniffing and downgrade attacks — most sites simply forget them.',
+    expert:'Checks HSTS, CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy and flags deprecated ones.' },
+  csp: { title:'Content-Security-Policy',
+    what:'A browser rule-set that says which scripts and resources are allowed to run on your pages.',
+    why:'CSP is the strongest defence against XSS — injected malicious scripts simply refuse to run.',
+    expert:'Grades directive quality; unsafe-inline/unsafe-eval and wildcards are penalized, nonce/strict-dynamic rewarded.' },
+  dnssec: { title:'DNSSEC',
+    what:'Cryptographic signatures on your DNS records, so resolvers can verify answers weren’t forged.',
+    why:'Without it, attackers can poison DNS caches and silently redirect your visitors to fake servers.',
+    expert:'Checks DNSKEY/DS/RRSIG presence and consistency.' },
+  'dnssec-chain': { title:'the DNSSEC chain of trust',
+    what:'DNSSEC only works if every level — root, TLD, and your zone — links its signatures correctly. This walks the whole chain.',
+    why:'A broken link anywhere silently disables the protection (or worse, makes your domain unresolvable for validating resolvers).',
+    expert:'Validates root → TLD → zone: DS at parent must match DNSKEY at child.' },
+  ocsp: { title:'OCSP / revocation',
+    what:'How browsers find out if your certificate has been cancelled (revoked) before its expiry date.',
+    why:'If a certificate’s key leaks, revocation is the only kill-switch — and stapling makes checking it fast and private.',
+    expert:'Checks OCSP responder presence, CRL distribution points and stapling support.' },
+  hsts: { title:'HSTS preload',
+    what:'A browser-built-in list of domains that must always use HTTPS — even on the very first visit.',
+    why:'Being preloaded closes the one window (the first insecure request) where an attacker on public Wi-Fi can hijack visitors.',
+    expert:'Checks the Strict-Transport-Security header (max-age ≥1y, includeSubDomains, preload) and Chrome preload list membership.' },
+  takeover: { title:'subdomain takeover',
+    what:'Looks for subdomains that point at cloud services (Heroku, S3, GitHub Pages…) which nobody claims anymore.',
+    why:'Anyone can register the abandoned service name and serve their own content — phishing pages — under YOUR domain.',
+    expert:'Detects dangling CNAMEs against known-fingerprint SaaS targets.' },
+  emailsec: { title:'email authentication',
+    what:'SPF, DKIM and DMARC — the three records that prove an email really came from your domain.',
+    why:'Without them, anyone can send convincing fake mail as you (invoices, password resets), and your own mail lands in spam.',
+    expert:'SPF policy strength, DMARC policy/pct/rua, DKIM selector discovery, BIMI bonus.' },
+  mx: { title:'MX / SMTP',
+    what:'The mail servers that receive email for this domain, and whether they accept encrypted delivery.',
+    why:'A single mail server is a single point of failure; missing STARTTLS means mail to you can be read in transit.',
+    expert:'Resolves MX records and probes each server’s SMTP banner + STARTTLS support.' },
+  mtasts: { title:'MTA-STS & DANE',
+    what:'Rules telling other mail servers to only deliver email to you over verified, encrypted connections.',
+    why:'Ordinary email encryption is trivially stripped by an attacker in the middle — MTA-STS/DANE make the encryption mandatory.',
+    expert:'Checks _mta-sts TXT + HTTPS policy file (mode enforce/testing) and TLSA records.' },
+  ipv6: { title:'IPv6',
+    what:'Whether the site is reachable over IPv6, the modern internet addressing standard.',
+    why:'A growing share of users (especially mobile) are IPv6-first; without it they reach you via slower translation layers — or not at all.',
+    expert:'AAAA presence, dual-stack, TLS handshake over v4 vs v6.' },
+  trace: { title:'connectivity',
+    what:'Basic reachability of the server: which IP addresses answer, over IPv4 and IPv6.',
+    why:'If nothing answers here, everything else is moot — the host is down or firewalled.',
+    expert:'A/AAAA resolution + reachability summary.' },
+  ports: { title:'the port scan',
+    what:'Knocks on the most common network "doors" (web, email, SSH, databases) to see which are open to the whole internet.',
+    why:'Databases or remote-desktop ports open to the world are among the most exploited misconfigurations anywhere.',
+    expert:'TCP connect scan of ~13 common ports, 2.5s timeout each.' },
+  http: { title:'HTTP features',
+    what:'How modern and efficient the web server setup is: HTTP/2/3, compression, and key headers.',
+    why:'Modern protocols and compression make the site noticeably faster for every visitor — and Google ranks on speed.',
+    expert:'Scores HTTP/2/3, brotli/gzip, HSTS, CSP, frame and referrer policies.' },
+  redirect: { title:'the redirect chain',
+    what:'What happens step-by-step when someone types your domain: every redirect hop until the final page.',
+    why:'Sites that don’t immediately redirect to HTTPS leave visitors exposed; long chains slow down every first visit.',
+    expert:'Follows up to the final hop recording status codes and timing.' },
+  tech: { title:'the technology fingerprint',
+    what:'The software visibly running the site: CMS, frameworks, hosting, analytics.',
+    why:'Useful for audits — and a reminder of what an attacker can see: advertised software versions invite targeted exploits.',
+    expert:'Passive fingerprinting from headers, cookies and HTML patterns.' },
+  cors: { title:'CORS',
+    what:'Rules controlling which OTHER websites are allowed to read data from this site inside a browser.',
+    why:'An over-permissive policy can let any malicious site read your users’ private data using their own logged-in session.',
+    expert:'Inspects Access-Control-Allow-Origin/Credentials/Methods responses.' },
+  robots: { title:'robots.txt & sitemap',
+    what:'The files that tell search engines what to index and where to find your pages.',
+    why:'A broken robots.txt can accidentally hide your whole site from Google — or expose paths you meant to keep quiet.',
+    expert:'Fetches /robots.txt and referenced sitemaps.' },
+  ct: { title:'Certificate Transparency',
+    what:'Public logs recording every certificate ever issued for your domain.',
+    why:'If a certificate appears here that you didn’t request, someone else may be impersonating your domain.',
+    expert:'Queries CT logs (crt.sh) for recent issuances.' },
+  typosquat: { title:'typosquatting',
+    what:'Checks whether look-alike misspellings of your domain (gooogle.com, githb.com…) are registered by someone.',
+    why:'Registered typos are the raw material of phishing campaigns against your users and brand.',
+    expert:'Generates common typo/homoglyph variants and checks registration.' },
+};
+
+const EXPLAIN_KEY='hetops_explain_open';
+function explainPrefs(){ try{ return JSON.parse(localStorage.getItem(EXPLAIN_KEY)||'{}'); }catch(e){ return {}; } }
+// Inject one collapsed explainer per pane. They are SIBLINGS of the content div,
+// so render*() innerHTML rewrites never touch them. Open state persists per tab.
+function initExplainers(){
+  const prefs=explainPrefs();
+  Object.entries(EXPLAIN).forEach(([tabId,ex])=>{
+    const pane=$('pane-'+tabId); if(!pane || pane.querySelector(':scope > details.explain')) return;
+    const d=document.createElement('details');
+    d.className='explain';
+    if(prefs[tabId]) d.open=true;
+    d.innerHTML=`<summary>What is ${esc(ex.title)}? <span class="explain-hint">plain-English</span></summary>
+      <div class="explain-body">
+        <p>${esc(ex.what)}</p>
+        <p><span class="explain-why">Why it matters:</span> ${esc(ex.why)}</p>
+        ${ex.expert?`<p class="explain-expert">${esc(ex.expert)}</p>`:''}
+      </div>`;
+    d.addEventListener('toggle',()=>{
+      const p=explainPrefs();
+      if(d.open) p[tabId]=1; else delete p[tabId];
+      try{ localStorage.setItem(EXPLAIN_KEY,JSON.stringify(p)); }catch(e){}
+    });
+    pane.insertBefore(d, pane.firstElementChild);
+  });
+}
+
 // ── DOM helpers ────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 function esc(v){ const d=document.createElement('div'); d.textContent=String(v??''); return d.innerHTML; }
@@ -1629,6 +1889,33 @@ function escAttr(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/
 // Copy from a data-copy attribute — keeps untrusted values out of inline JS (XSS-safe).
 function cpEl(btn){ cp(btn.getAttribute('data-copy')||'', btn); }
 
+// ── Focus trap for modal overlays ──────────────────────────────
+// Keeps keyboard focus inside an open dialog and restores it to the trigger on
+// close — without this, Tab walks into the page behind the modal.
+let _trapEl=null, _trapReturn=null, _trapHandler=null;
+const FOCUSABLE='a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+function trapFocus(el){
+  if(!el) return;
+  releaseFocus();
+  _trapEl=el; _trapReturn=document.activeElement;
+  _trapHandler=(e)=>{
+    if(e.key!=='Tab') return;
+    const items=[...el.querySelectorAll(FOCUSABLE)].filter(n=>n.offsetParent!==null);
+    if(!items.length) return;
+    const first=items[0], last=items[items.length-1];
+    if(e.shiftKey && document.activeElement===first){ e.preventDefault(); last.focus(); }
+    else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); }
+  };
+  document.addEventListener('keydown', _trapHandler, true);
+  const target=el.querySelector(FOCUSABLE);
+  if(target) setTimeout(()=>target.focus(), 60);
+}
+function releaseFocus(){
+  if(_trapHandler) document.removeEventListener('keydown', _trapHandler, true);
+  if(_trapReturn && typeof _trapReturn.focus==='function'){ try{ _trapReturn.focus(); }catch(e){} }
+  _trapEl=null; _trapReturn=null; _trapHandler=null;
+}
+
 // ── Tab switching ──────────────────────────────────────────────
 function tab(name){
   document.querySelectorAll('.tab-btn').forEach(b=>{ b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
@@ -1657,7 +1944,17 @@ function scrollTabIntoView(btn){
 }
 
 // ── Category selection ─────────────────────────────────────────
-const CAT_FIRST = { core:'dns', security:'ssl', email:'emailsec', network:'ipv6', web:'http', intelligence:'ct' };
+const CAT_FIRST = { overview:'overview', core:'dns', security:'ssl', email:'emailsec', network:'ipv6', web:'http', intelligence:'ct' };
+// Which category each result tab belongs to (drives live per-category issue counts).
+const TAB_CAT = {
+  dns:'core', whois:'core', geoip:'core', propagation:'core',
+  ssl:'security', security:'security', headers:'security', csp:'security', dnssec:'security',
+  'dnssec-chain':'security', ocsp:'security', hsts:'security', takeover:'security',
+  emailsec:'email', mx:'email', mtasts:'email',
+  ipv6:'network', trace:'network', ports:'network',
+  http:'web', redirect:'web', tech:'web', cors:'web', robots:'web',
+  ct:'intelligence', typosquat:'intelligence',
+};
 function selectCat(name){
   document.querySelectorAll('.cat-tab').forEach(b=>{ b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
   document.querySelectorAll('.sub-tabs-group').forEach(g=>g.style.display='none');
@@ -1776,8 +2073,9 @@ async function runLookup(){
 
   Object.keys(S).forEach(k=>S[k]=null);
   analyzing = true;
+  $('overviewContent').innerHTML='<div class="card"><div class="load-box pulse-anim"><div class="load-spinner"></div>Building overview…</div></div>';
   renderScorecard();          // show the scorecard's "analyzing…" state immediately
-  selectCat('core');
+  selectCat('overview');      // land on the plain-language summary, not raw DNS
   await go(domain, signal, myToken);
 }
 
@@ -2218,7 +2516,7 @@ function renderSsl(data){
 function viewCertPem(index){
   const chain=S.ssl?.certificate?.chain||[];
   const cert=chain[index];
-  if(!cert?.pem){ alert('PEM not available'); return; }
+  if(!cert?.pem){ toast('PEM not available','warn'); return; }
   const w=window.open('','_blank','width=700,height=600');
   w.document.write(`<html><head><title>Certificate ${index} PEM</title><style>body{background:#050514;color:#f1f5f9;font-family:'Courier New',monospace;padding:20px;font-size:12px;line-height:1.5}pre{white-space:pre-wrap;word-break:break-all}</style></head><body><pre>${cert.pem.replace(/</g,'&lt;')}</pre></body></html>`);
 }
@@ -2362,22 +2660,16 @@ function blStat(d){
 }
 
 // ── Score ──────────────────────────────────────────────────────
-// Pure computation of the weighted health score, shared by the score ring and
-// the scorecard. Returns null until at least one weighted check has data.
+// The weighted health score comes from /shared/health-score.js — the SAME module
+// the server uses for the badge and /api/scan, so grades can never drift.
+// This adapter maps client state S into it and adds the ring color + breakdown.
 function computeHealth(){
-  let pts=0, tot=0;
-  if(S.dns?.insights){
-    const c=S.dns.insights.checks;
-    pts+=(c.spf?15:0)+(c.dmarc?15:0)+(c.caa?10:0)+(c.mx?10:0); tot+=50;
-  }
-  if(S.emailsec&&!S.emailsec.error){ pts+=Math.round((S.emailsec.overallScore||0)*0.2); tot+=20; }
-  if(S.ssl&&!S.ssl.error){ const d=S.ssl.certificate?.daysRemaining; pts+=d>90?30:d>30?20:d>0?10:0; tot+=30; }
-  if(S.bl?.results){ pts+=S.bl.results.some(r=>r.listed)?0:10; tot+=10; }
-  if(!tot) return null;
-  const pct=Math.round(pts/tot*100);
-  const grade=pct>=95?'A+':pct>=85?'A':pct>=70?'B':pct>=50?'C':'D';
-  const gc=pct>=85?'var(--ok)':pct>=70?'#a3e635':pct>=50?'var(--warn)':'var(--err)';
-  return {pct, grade, gc};
+  const h = window.HetOpsScore && HetOpsScore.computeHealthScore({
+    dns: S.dns, ssl: S.ssl, emailsec: S.emailsec, blacklist: S.bl,
+  });
+  if(!h) return null;
+  const gc=h.pct>=85?'var(--ok)':h.pct>=70?'#a3e635':h.pct>=50?'var(--warn)':'var(--err)';
+  return {pct:h.pct, grade:h.grade, gc, pts:h.pts, tot:h.tot, breakdown:h.breakdown};
 }
 
 // Count the score ring's number up to its target, synced with the arc animation.
@@ -2422,6 +2714,104 @@ function score(){
   if(S.geoip?.geo?.org) chips.push(`<span class="pill">${esc(S.geoip.geo.org)}</span>`);
   $('domainChips').innerHTML=chips.join('');
   renderScorecard();   // progressively populate the scorecard as checks complete
+  renderOverview();
+  renderScoreBreakdown();
+  updateCatCounts();
+}
+
+// ── Score transparency ─────────────────────────────────────────
+// Clicking the score ring/grade toggles a plain "earned/max/why" breakdown so the
+// grade is never a black box. Rows deep-link to the tab holding the evidence.
+let scoreBreakdownOpen=false;
+function toggleScoreBreakdown(){ scoreBreakdownOpen=!scoreBreakdownOpen; renderScoreBreakdown(); }
+function renderScoreBreakdown(){
+  const el=$('scoreBreakdown'); if(!el) return;
+  const h=computeHealth();
+  if(!h || !scoreBreakdownOpen){ el.style.display='none'; return; }
+  const rows=h.breakdown.map(sec=>{
+    const secRows=sec.rows.map(r=>`<div class="sb-row">
+      <span class="sb-ico" style="color:${r.ok?'var(--ok)':'var(--err)'}">${r.ok?'✓':'✗'}</span>
+      <span class="sb-lbl">${esc(r.label)}</span>
+      <button class="sb-pts" onclick="deepLinkTab('${esc(r.tab)}')" title="View details">${r.pts}/${r.max}</button>
+    </div>`).join('');
+    return `<div class="sb-sec">
+      <div class="sb-sec-head"><span>${esc(sec.label)}</span><span class="sb-sec-pts">${sec.earned}/${sec.max}</span></div>
+      ${secRows}
+    </div>`;
+  }).join('');
+  el.innerHTML=`<div class="sb-head">
+      <span>How the grade is calculated</span>
+      <span class="sb-total">${h.pts} of ${h.tot} points → ${h.pct}/100 (${h.grade})</span>
+    </div>
+    ${rows}
+    <div class="sb-foot">Score covers DNS, email, TLS and blacklist. Every other check appears as a finding in the scorecard above.</div>`;
+  el.style.display='';
+}
+
+// ── Overview landing ────────────────────────────────────────────
+// A plain-language verdict + one line per category, so the first thing a user
+// sees is "what's wrong and where", not raw DNS records.
+const CAT_LABEL={ core:'Core / DNS', security:'Security', email:'Email', network:'Network', web:'Web', intelligence:'Intelligence' };
+function catIssueCounts(){
+  const counts={}; Object.keys(CAT_LABEL).forEach(c=>counts[c]={crit:0,high:0,med:0,low:0,good:0});
+  collectFindings().forEach(x=>{ const cat=TAB_CAT[x.tab]; if(cat&&counts[cat]) counts[cat][x.sev]++; });
+  return counts;
+}
+function updateCatCounts(){
+  const c=catIssueCounts();
+  Object.keys(CAT_LABEL).forEach(cat=>{
+    const el=$('count-'+cat); if(!el) return;
+    const issues=c[cat].crit+c[cat].high+c[cat].med+c[cat].low;
+    el.textContent=issues>0?issues:'✓';
+    el.className='cat-count'+(issues>0?' has-issues':' clean');
+  });
+}
+function renderOverview(){
+  const el=$('overviewContent'); if(!el) return;
+  const h=computeHealth();
+  const findings=collectFindings();
+  const issues=findings.filter(x=>x.sev!=='good');
+  const crit=issues.filter(x=>x.sev==='crit').length, high=issues.filter(x=>x.sev==='high').length;
+  const domain=$('currentDomain')?.textContent||'this domain';
+
+  // One-sentence verdict from the worst signals.
+  let verdict, vClass;
+  if(!h){ verdict=analyzing?'Analyzing…':'Not enough data yet.'; vClass='muted'; }
+  else if(crit){ verdict=`${domain} needs attention: ${crit} critical issue${crit!==1?'s':''} could cause an outage or breach.`; vClass='err'; }
+  else if(high){ verdict=`${domain} is mostly healthy, but ${high} high-priority issue${high!==1?'s':''} should be fixed.`; vClass='warn'; }
+  else if(issues.length){ verdict=`${domain} looks solid — only ${issues.length} minor improvement${issues.length!==1?'s':''} suggested.`; vClass='ok'; }
+  else { verdict=`${domain} passed every check with no issues found.`; vClass='ok'; }
+
+  const counts=catIssueCounts();
+  const cats=Object.keys(CAT_LABEL).map(cat=>{
+    const cc=counts[cat];
+    const issueN=cc.crit+cc.high+cc.med+cc.low;
+    const worst=cc.crit?'crit':cc.high?'high':cc.med?'med':cc.low?'low':'good';
+    const dotCls=worst==='crit'||worst==='high'?'err':worst==='med'||worst==='low'?'warn':'ok';
+    const summary=issueN?`${issueN} issue${issueN!==1?'s':''} to review`:'No issues found';
+    return `<button class="ov-cat" onclick="selectCat('${cat}')">
+      <span class="ov-cat-dot ${dotCls}"></span>
+      <span class="ov-cat-name">${esc(CAT_LABEL[cat])}</span>
+      <span class="ov-cat-sum">${summary}</span>
+      <span class="ov-cat-arrow">→</span>
+    </button>`;
+  }).join('');
+
+  const gradeBox=h?`<div class="ov-grade" onclick="toggleScoreBreakdown()" role="button" tabindex="0"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleScoreBreakdown();}"
+      title="Click for the score breakdown">
+      <div class="ov-grade-letter" style="color:${h.gc}">${h.grade}</div>
+      <div class="ov-grade-pct">${h.pct}<span>/100</span></div>
+      <div class="ov-grade-hint">how is this calculated?</div>
+    </div>`:'';
+
+  el.innerHTML=`<div class="card ov-card">
+    <div class="ov-top">
+      ${gradeBox}
+      <div class="ov-verdict ${vClass}">${esc(verdict)}</div>
+    </div>
+    <div class="ov-cats">${cats}</div>
+  </div>`;
 }
 
 // ── Security Scorecard ─────────────────────────────────────────
@@ -2429,81 +2819,264 @@ function score(){
 // actionable findings. Each finding is defensive — only emitted when its source
 // data is present and not an error, so partial results never break the summary.
 const SEV_RANK = { crit:0, high:1, med:2, low:3, good:4 };
+
+// Per-finding remediation metadata: which tab holds the evidence, a plain-language
+// fix, and (where a DNS record / header solves it) a copy-ready snippet.
+const FINDING_META = {
+  'ssl-expired':      { tab:'ssl', fix:'Renew the certificate with your CA or ACME client (e.g. certbot renew) and reload the web server.' },
+  'ssl-expiring':     { tab:'ssl', fix:'Renew before expiry — or better, set up automatic renewal (Let’s Encrypt renews at 30 days remaining).' },
+  'ssl-sha1':         { tab:'ssl', fix:'Reissue the certificate — every modern CA signs with SHA-256 by default.' },
+  'ssl-sslv3':        { tab:'ssl', fix:'Disable SSLv3 in the server TLS config (it has been obsolete since 2015).' },
+  'ssl-legacy-tls':   { tab:'ssl', fix:'Set the minimum TLS version to 1.2 in your server/CDN configuration.' },
+  'ssl-no-tls13':     { tab:'ssl', fix:'Enable TLS 1.3 — supported by all maintained servers (nginx ≥1.13, OpenSSL ≥1.1.1).' },
+  'ssl-vuln':         { tab:'ssl', fix:'Update the TLS library / server and disable the affected protocol or cipher.' },
+  'ssl-good':         { tab:'ssl' },
+  'spf-missing':      { tab:'emailsec', fix:'Publish a TXT record naming the servers allowed to send your mail, ending in -all.',
+                        snippet:d=>`${d}. TXT "v=spf1 include:<your-mail-provider> -all"` },
+  'dmarc-missing':    { tab:'emailsec', fix:'Publish a DMARC policy TXT record at _dmarc — start with p=quarantine and an aggregate-report address.',
+                        snippet:d=>`_dmarc.${d}. TXT "v=DMARC1; p=quarantine; rua=mailto:dmarc@${d}"` },
+  'dmarc-none':       { tab:'emailsec', fix:'Change p=none to p=quarantine (then p=reject once reports look clean).',
+                        snippet:d=>`_dmarc.${d}. TXT "v=DMARC1; p=quarantine; rua=mailto:dmarc@${d}"` },
+  'dmarc-pct':        { tab:'emailsec', fix:'Raise pct to 100 so the policy protects all mail.' },
+  'dkim-missing':     { tab:'emailsec', fix:'Enable DKIM signing at your mail provider and publish the public key they give you at <selector>._domainkey.' },
+  'email-good':       { tab:'emailsec' },
+  'bl-listed':        { tab:'security', fix:'Visit each blacklist’s delisting page and request removal; find and stop the source of spam first.' },
+  'bl-clean':         { tab:'security' },
+  'dnssec-off':       { tab:'dnssec', fix:'Enable DNSSEC at your DNS host (usually one click), then publish the DS record at your registrar.' },
+  'dnssec-incomplete':{ tab:'dnssec', fix:'Publish the DS record at your registrar to complete the chain of trust.' },
+  'dnssec-good':      { tab:'dnssec' },
+  'dnssecchain-broken':{ tab:'dnssec-chain', fix:'Re-sync the DS record at the parent with your current DNSKEY (re-publish after key rollovers).' },
+  'takeover-found':   { tab:'takeover', fix:'Delete the dangling CNAME record, or re-claim the service it points to.' },
+  'takeover-clean':   { tab:'takeover' },
+  'ports-risky':      { tab:'ports', fix:'Firewall these ports to trusted IPs only (or bind the services to localhost/VPN).' },
+  'ports-good':       { tab:'ports' },
+  'headers-missing':  { tab:'headers', fix:'Add the header in your web server or CDN configuration.' },
+  'headers-hsts':     { tab:'headers', fix:'Add the Strict-Transport-Security header so browsers always use HTTPS.',
+                        snippet:()=>`Strict-Transport-Security: max-age=31536000; includeSubDomains` },
+  'headers-good':     { tab:'headers' },
+  'hsts-preload':     { tab:'hsts', fix:'Submit the domain at hstspreload.org — it already meets the requirements.' },
+  'whois-expiring':   { tab:'whois', fix:'Renew the domain at your registrar and turn on auto-renew.' },
+  'whois-good':       { tab:'whois' },
+  'prop-inconsistent':{ tab:'propagation', fix:'If you changed DNS recently, wait for TTLs to expire; otherwise verify records at your DNS host.' },
+  'prop-good':        { tab:'propagation' },
+  'mx-none':          { tab:'mx', fix:'If this domain should receive email, add MX records at your DNS host. If not, this is fine.' },
+  'mx-single':        { tab:'mx', fix:'Add a second MX record with a higher priority number as backup.' },
+  'mx-nostarttls':    { tab:'mx', fix:'Enable STARTTLS on the mail server so inbound mail is encrypted in transit.' },
+  'mx-good':          { tab:'mx' },
+  'mtasts-missing':   { tab:'mtasts', fix:'Publish an _mta-sts TXT record plus the policy file at https://mta-sts.<domain>/.well-known/mta-sts.txt.',
+                        snippet:d=>`_mta-sts.${d}. TXT "v=STSv1; id=${new Date().toISOString().slice(0,10).replace(/-/g,'')}01"` },
+  'mtasts-testing':   { tab:'mtasts', fix:'Switch the policy file from mode: testing to mode: enforce once delivery reports look clean.' },
+  'mtasts-good':      { tab:'mtasts' },
+  'ocsp-nostapling':  { tab:'ocsp', fix:'Enable OCSP stapling in the web server (nginx: ssl_stapling on; — apache: SSLUseStapling on).' },
+  'ocsp-good':        { tab:'ocsp' },
+  'redirect-nohttps': { tab:'redirect', fix:'Add a permanent (301) redirect from http:// to https:// for every request.' },
+  'redirect-long':    { tab:'redirect', fix:'Collapse the chain — redirect straight to the final URL in one hop.' },
+  'redirect-good':    { tab:'redirect' },
+  'csp-missing':      { tab:'csp', fix:'Start with a report-only policy, review the reports, then enforce.',
+                        snippet:()=>`Content-Security-Policy: default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'` },
+  'csp-unsafe':       { tab:'csp', fix:'Replace unsafe-inline/unsafe-eval with nonces or hashes (add strict-dynamic for modern browsers).' },
+  'csp-good':         { tab:'csp' },
+  'cors-wide':        { tab:'cors', fix:'Never combine a wildcard origin with credentials — echo specific trusted origins instead.' },
+  'ipv6-missing':     { tab:'ipv6', fix:'Add an AAAA record pointing at your server’s IPv6 address (most CDNs enable this with one toggle).' },
+  'ipv6-good':        { tab:'ipv6' },
+  'trace-unreachable':{ tab:'trace', fix:'Check that the server is up and that A/AAAA records point to the right address.' },
+  'caa-missing':      { tab:'dns', fix:'Add a CAA record naming the only CA allowed to issue certificates for this domain.',
+                        snippet:d=>`${d}. CAA 0 issue "letsencrypt.org"` },
+  'dns-good':         { tab:'dns' },
+  'typosquat-found':  { tab:'typosquat', fix:'Review who registered them; consider defensive registration of high-risk variants and takedown requests for active phishing.' },
+  'typosquat-clean':  { tab:'typosquat' },
+  'http-good':        { tab:'http' },
+};
+
 function collectFindings(){
   const f=[];
-  const add=(sev,title,detail,tab)=>f.push({sev,title,detail,tab});
+  const add=(id,sev,title,detail)=>{
+    const meta=FINDING_META[id]||FINDING_META[id.replace(/:.*$/,'')]||{};
+    f.push({id,sev,title,detail,tab:meta.tab,fix:meta.fix,snippet:meta.snippet});
+  };
 
   // ── SSL / TLS ──
   if(S.ssl && !S.ssl.error){
     const cert=S.ssl.certificate||{};
     const days=cert.daysRemaining;
-    if(cert.expired || days<0) add('crit','SSL certificate has expired','Browsers will block the site until the certificate is renewed.','ssl');
-    else if(days!=null && days<15) add('crit',`Certificate expires in ${days} day${days!==1?'s':''}`,'Renew immediately to avoid an outage.','ssl');
-    else if(days!=null && days<30) add('high',`Certificate expires in ${days} days`,'Schedule renewal soon.','ssl');
-    if(cert.sha1Signed) add('high','Certificate signed with SHA-1','SHA-1 is deprecated and considered insecure — reissue with SHA-256.','ssl');
+    if(cert.expired || days<0) add('ssl-expired','crit','SSL certificate has expired','Browsers will block the site until the certificate is renewed.');
+    else if(days!=null && days<15) add('ssl-expiring','crit',`Certificate expires in ${days} day${days!==1?'s':''}`,'Renew immediately to avoid an outage.');
+    else if(days!=null && days<30) add('ssl-expiring','high',`Certificate expires in ${days} days`,'Schedule renewal soon.');
+    if(cert.sha1Signed) add('ssl-sha1','high','Certificate signed with SHA-1','SHA-1 is deprecated and considered insecure — reissue with SHA-256.');
     const prot=S.ssl.protocols||{};
-    if(prot.sslv3) add('crit','SSL 3.0 is enabled','Obsolete and vulnerable (POODLE) — disable it.','ssl');
-    if(prot.tls10 || prot.tls11) add('med',`Legacy TLS ${prot.tls10?'1.0':'1.1'} enabled`,'Disable TLS 1.0/1.1; require TLS 1.2 or higher.','ssl');
-    if(!prot.tls13 && prot.tls12!=null) add('low','TLS 1.3 not supported','Enable TLS 1.3 for better performance and security.','ssl');
+    if(prot.sslv3) add('ssl-sslv3','crit','SSL 3.0 is enabled','Obsolete and vulnerable (POODLE) — disable it.');
+    if(prot.tls10 || prot.tls11) add('ssl-legacy-tls','med',`Legacy TLS ${prot.tls10?'1.0':'1.1'} enabled`,'Disable TLS 1.0/1.1; require TLS 1.2 or higher.');
+    if(!prot.tls13 && prot.tls12!=null) add('ssl-no-tls13','low','TLS 1.3 not supported','Enable TLS 1.3 for better performance and security.');
     const vuln=S.ssl.vulnerabilities||{};
     Object.entries(vuln).filter(([,v])=>v&&v.vulnerable).forEach(([k,v])=>
-      add('high',`TLS vulnerable to ${k}`, v.details||'Known TLS weakness detected.','ssl'));
+      add(`ssl-vuln:${k}`,'high',`TLS vulnerable to ${k}`, v.details||'Known TLS weakness detected.'));
     const letter=S.ssl.grade?.letter;
     if((letter==='A+'||letter==='A') && days>30 && !cert.sha1Signed)
-      add('good',`Strong TLS configuration (grade ${letter})`,`Valid certificate, ${days} days remaining.`,'ssl');
+      add('ssl-good','good',`Strong TLS configuration (grade ${letter})`,`Valid certificate, ${days} days remaining.`);
   }
 
   // ── Email authentication ──
   if(S.emailsec && !S.emailsec.error){
     const spf=S.emailsec.spf||{}, dmarc=S.emailsec.dmarc||{}, dkim=S.emailsec.dkim||{};
-    if(!spf.present) add('high','No SPF record','Without SPF, attackers can more easily spoof your domain in email.','emailsec');
-    if(!dmarc.present) add('high','No DMARC record','DMARC tells receivers how to handle spoofed mail — publish a policy.','emailsec');
-    else if(dmarc.policy==='none') add('med','DMARC policy is "none"','Move to quarantine or reject to actually block spoofed mail.','emailsec');
-    else if(dmarc.pct!=null && dmarc.pct<100) add('low',`DMARC applies to only ${dmarc.pct}% of mail`,'Raise pct to 100 once confident.','emailsec');
-    if(!dkim.present) add('med','No DKIM signature detected','DKIM lets receivers verify message integrity.','emailsec');
+    if(!spf.present) add('spf-missing','high','No SPF record','Without SPF, attackers can more easily spoof your domain in email.');
+    if(!dmarc.present) add('dmarc-missing','high','No DMARC record','DMARC tells receivers how to handle spoofed mail — publish a policy.');
+    else if(dmarc.policy==='none') add('dmarc-none','med','DMARC policy is "none"','Move to quarantine or reject to actually block spoofed mail.');
+    else if(dmarc.pct!=null && dmarc.pct<100) add('dmarc-pct','low',`DMARC applies to only ${dmarc.pct}% of mail`,'Raise pct to 100 once confident.');
+    if(!dkim.present) add('dkim-missing','med','No DKIM signature detected','DKIM lets receivers verify message integrity.');
     if(spf.present && dmarc.present && (dmarc.policy==='reject'||dmarc.policy==='quarantine') && dkim.present)
-      add('good','Email authentication fully configured','SPF, DKIM and an enforcing DMARC policy are all in place.','emailsec');
+      add('email-good','good','Email authentication fully configured','SPF, DKIM and an enforcing DMARC policy are all in place.');
   } else if(S.dns?.insights?.checks){
     const c=S.dns.insights.checks;
-    if(!c.spf) add('high','No SPF record','Publish an SPF record to reduce email spoofing.','dns');
-    if(!c.dmarc) add('high','No DMARC record','Publish a DMARC policy to control spoofed mail.','dns');
+    if(!c.spf) add('spf-missing','high','No SPF record','Publish an SPF record to reduce email spoofing.');
+    if(!c.dmarc) add('dmarc-missing','high','No DMARC record','Publish a DMARC policy to control spoofed mail.');
   }
 
   // ── Blacklist ──
   if(S.bl?.results){
     const listed=S.bl.results.filter(r=>r.listed);
-    if(listed.length) add('crit',`Listed on ${listed.length} blacklist${listed.length!==1?'s':''}`,'Being blacklisted harms email deliverability and reputation — request delisting.','dns');
-    else add('good','Not on any monitored blacklist','Clean reputation across checked DNSBLs.','dns');
+    if(listed.length) add('bl-listed','crit',`Listed on ${listed.length} blacklist${listed.length!==1?'s':''}`,'Being blacklisted harms email deliverability and reputation — request delisting.');
+    else add('bl-clean','good','Not on any monitored blacklist','Clean reputation across checked DNSBLs.');
+  }
+
+  // ── DNS hygiene ──
+  if(S.dns?.insights?.checks){
+    const c=S.dns.insights.checks;
+    if(!c.caa) add('caa-missing','low','No CAA record','Any certificate authority can currently issue certificates for this domain.');
+    if(!c.mx) add('mx-none','low','No MX records','This domain cannot receive email — fine if that is intentional.');
+    const recs=S.dns.summary?.totalRecords ?? S.dns.totals?.records;
+    if(recs>0 && c.caa) add('dns-good','good','DNS hygiene looks solid',`${recs} records resolved; CAA restricts certificate issuance.`);
+  }
+
+  // ── WHOIS / registration expiry ──
+  if(S.whois && !S.whois.error && S.whois.rawData){
+    const days = S.whois.expiresAt
+      ? Math.floor((Date.parse(S.whois.expiresAt)-Date.now())/864e5)
+      : whoisExpiryDays(S.whois.rawData);
+    if(days!=null){
+      if(days<=0) add('whois-expiring','crit','Domain registration has EXPIRED','The domain can be deleted or claimed by someone else — renew immediately.');
+      else if(days<30) add('whois-expiring','crit',`Domain registration expires in ${days} day${days!==1?'s':''}`,'Losing the registration means losing the domain — renew now.');
+      else if(days<90) add('whois-expiring','high',`Domain registration expires in ${days} days`,'Renew soon or enable auto-renew at your registrar.');
+      else add('whois-good','good','Domain registration healthy',`${days} days until registration expiry.`);
+    }
   }
 
   // ── DNSSEC ──
   if(S.dnssec && !S.dnssec.error){
-    if(S.dnssec.rating==='not_configured') add('med','DNSSEC not enabled','DNSSEC protects against DNS spoofing and cache poisoning.','dnssec');
-    else if(S.dnssec.rating==='incomplete') add('low','DNSSEC signed but chain incomplete','DNSKEY present but no DS record at the parent — complete the chain of trust.','dnssec');
-    else if(S.dnssec.rating==='good') add('good','DNSSEC properly configured','Full chain of trust validated.','dnssec');
+    if(S.dnssec.rating==='not_configured') add('dnssec-off','med','DNSSEC not enabled','DNSSEC protects against DNS spoofing and cache poisoning.');
+    else if(S.dnssec.rating==='incomplete') add('dnssec-incomplete','low','DNSSEC signed but chain incomplete','DNSKEY present but no DS record at the parent — complete the chain of trust.');
+    else if(S.dnssec.rating==='good') add('dnssec-good','good','DNSSEC properly configured','Full chain of trust validated.');
   }
+  if(S.dnssecChain && !S.dnssecChain.error && S.dnssecChain.status==='partial')
+    add('dnssecchain-broken','high','DNSSEC chain has validation issues',(S.dnssecChain.issues||[]).slice(0,2).join(' · ')||'Signed, but the chain of trust does not fully validate.');
 
   // ── Subdomain takeover ──
-  if(S.takeover?.vulnerabilities?.length)
-    add('crit',`${S.takeover.vulnerabilities.length} possible subdomain takeover${S.takeover.vulnerabilities.length!==1?'s':''}`,'Dangling CNAMEs point to unclaimed services — remove or reclaim them.','takeover');
+  if(S.takeover && !S.takeover.error){
+    const v=S.takeover.vulnerabilities||[];
+    if(v.length) add('takeover-found','crit',`${v.length} possible subdomain takeover${v.length!==1?'s':''}`,'Dangling CNAMEs point to unclaimed services — remove or reclaim them.');
+    else add('takeover-clean','good','No subdomain takeover risks found',
+      (S.takeover.results||[]).length ? `All ${S.takeover.results.length} third-party CNAMEs appear safe.` : 'No CNAMEs pointing at third-party services.');
+  }
 
-  // ── Risky open ports ──
+  // ── Open ports ──
   if(S.ports?.ports){
     const RISKY={21:'FTP',23:'Telnet',3306:'MySQL',5432:'PostgreSQL',3389:'RDP'};
     const exposed=S.ports.ports.filter(p=>p.open && RISKY[p.port]).map(p=>`${RISKY[p.port]} (${p.port})`);
-    if(exposed.length) add('med',`Sensitive service${exposed.length!==1?'s':''} exposed`,`Publicly reachable: ${exposed.join(', ')}. Restrict with a firewall.`,'ports');
+    if(exposed.length) add('ports-risky','med',`Sensitive service${exposed.length!==1?'s':''} exposed`,`Publicly reachable: ${exposed.join(', ')}. Restrict with a firewall.`);
+    else add('ports-good','good','No sensitive ports exposed','No database, FTP, Telnet or RDP ports reachable from the internet.');
   }
 
-  // ── Security headers / HSTS ──
-  if(S.headers && !S.headers.error && S.headers.score!=null && S.headers.score<50)
-    add('med','Weak security headers',`Header score ${S.headers.score}/100 — add HSTS, CSP, X-Content-Type-Options, etc.`,'headers');
+  // ── Security headers ──
+  if(S.headers && !S.headers.error && S.headers.analysis?.checks){
+    const checks=S.headers.analysis.checks;
+    Object.entries(checks).forEach(([name,c])=>{
+      if(name==='Content-Security-Policy') return; // covered in depth by the CSP tab
+      if(c.deprecated && !c.passed) add('headers-missing','low',`Deprecated header: ${name}`,'Remove it — it can introduce vulnerabilities in older browsers.');
+      else if(!c.passed){
+        if(name==='Strict-Transport-Security') add('headers-hsts','med','Missing HSTS header','Browsers can still be tricked into plain-HTTP connections (SSL stripping).');
+        else add(`headers-missing:${name}`,'low',`Missing header: ${name}`, c.detail && c.detail!=='missing' ? c.detail : 'A one-line, free protection worth adding.');
+      }
+    });
+    if((S.headers.analysis.score||0)>=80) add('headers-good','good',`Strong security headers (${S.headers.analysis.score}/100)`,'The important browser protections are in place.');
+  }
   if(S.hsts && !S.hsts.error && S.hsts.preloaded===false && S.hsts.eligible)
-    add('low','Not on the HSTS preload list','Eligible for preload — submit to harden against SSL-stripping.','hsts');
+    add('hsts-preload','low','Not on the HSTS preload list','Eligible for preload — submit to harden against SSL-stripping.');
+
+  // ── Propagation ──
+  if(S.prop && !S.prop.error && Array.isArray(S.prop.results)){
+    const vals=S.prop.results.filter(r=>r.status==='ok'&&(r.records||[]).length>0).map(r=>(r.records||[]).map(x=>x.value).sort().join(','));
+    if(vals.length>=2 && new Set(vals).size>1) add('prop-inconsistent','med','DNS answers differ between resolvers','Some visitors may reach a different server — recent change still propagating, or a misconfiguration.');
+    else if(vals.length>=2) add('prop-good','good','DNS consistent worldwide',`${vals.length} global resolvers agree.`);
+  }
+
+  // ── MX / SMTP ──
+  if(S.mx && !S.mx.error && Array.isArray(S.mx.mxServers) && S.mx.mxServers.length){
+    const servers=S.mx.mxServers;
+    const noTls=servers.filter(s=>s.smtp && s.smtp.starttls===false);
+    if(noTls.length) add('mx-nostarttls','med',`${noTls.length} mail server${noTls.length!==1?'s':''} without STARTTLS`,'Inbound mail to these servers can be read in transit.');
+    if(servers.length===1) add('mx-single','low','Single mail server','One MX record — mail bounces if that server goes down.');
+    if(servers.length>=2 && !noTls.length) add('mx-good','good','Mail infrastructure redundant and encrypted',`${servers.length} MX servers, all supporting STARTTLS.`);
+  }
+
+  // ── MTA-STS / DANE ──
+  if(S.mtasts && !S.mtasts.error && S.dns?.insights?.checks?.mx){
+    const m=S.mtasts.mtaSts||{};
+    if(!m.present) add('mtasts-missing','low','No MTA-STS policy','Encryption of mail delivered to you can be silently stripped by an attacker in the middle.');
+    else if(m.policy && m.policy.mode!=='enforce') add('mtasts-testing','low',`MTA-STS in "${m.policy.mode}" mode`,'The policy exists but is not enforced yet.');
+    else if(m.present) add('mtasts-good','good','MTA-STS enforced','Mail servers must deliver to you over verified TLS.');
+  }
+
+  // ── OCSP ──
+  if(S.ocsp && !S.ocsp.error){
+    if(S.ocsp.stapling && S.ocsp.stapling.supported===false && S.ocsp.ocsp?.supported)
+      add('ocsp-nostapling','low','OCSP stapling not enabled','Revocation checks are slower and leak visitor info to the CA.');
+    else if(S.ocsp.stapling?.supported) add('ocsp-good','good','OCSP stapling enabled','Fast, private certificate revocation checking.');
+  }
+
+  // ── Redirect chain ──
+  if(S.redirect && !S.redirect.error && Array.isArray(S.redirect.chain) && S.redirect.chain.length){
+    const chain=S.redirect.chain;
+    const last=chain[chain.length-1];
+    const finalUrl=(last.redirectTo||last.url||'');
+    if(finalUrl.startsWith('http://')) add('redirect-nohttps','high','Site not redirecting to HTTPS','Visitors typing the bare domain stay on unencrypted HTTP.');
+    else if(chain.length>4) add('redirect-long','low',`Redirect chain has ${chain.length} hops`,'Each hop adds latency to every first visit.');
+    else if(finalUrl.startsWith('https://')) add('redirect-good','good','Redirects cleanly to HTTPS',`${chain.length} hop${chain.length!==1?'s':''} to the final secure URL.`);
+  }
+
+  // ── CSP ──
+  if(S.csp && !S.csp.error){
+    if(!S.csp.present) add('csp-missing','med','No Content-Security-Policy','The primary browser defence against XSS is absent.');
+    else {
+      const unsafe=(S.csp.issues||[]).filter(i=>/unsafe-(inline|eval)/i.test(i));
+      if(unsafe.length) add('csp-unsafe','med','CSP allows unsafe-inline / unsafe-eval','These directives largely defeat the purpose of CSP.');
+      else if((S.csp.score||0)>=80) add('csp-good','good',`Strong CSP (grade ${S.csp.grade||'A'})`,'Well-restricted content sources.');
+    }
+  }
+
+  // ── CORS ──
+  if(S.cors && !S.cors.error && S.cors.cors?.enabled){
+    const c=S.cors.cors;
+    if(c.origin==='*' && c.credentials) add('cors-wide','high','CORS wildcard with credentials','Any website can read authenticated responses from this origin.');
+  }
+
+  // ── IPv6 ──
+  if(S.ipv6 && !S.ipv6.error){
+    if(!(S.ipv6.ipv6||[]).length) add('ipv6-missing','low','No IPv6 (AAAA) address','IPv6-first networks reach this site via slower translation layers.');
+    else if(S.ipv6.dualStack) add('ipv6-good','good','Dual-stack IPv4 + IPv6','Reachable natively on both address families.');
+  }
+
+  // ── Reachability ──
+  if(S.trace && !S.trace.error && S.trace.hasIPv4===false && S.trace.hasIPv6===false)
+    add('trace-unreachable','high','Host does not resolve to any address','No A or AAAA records answered — the site is unreachable.');
+
+  // ── HTTP features ──
+  if(S.http && !S.http.error && (S.http.score||0)>=80)
+    add('http-good','good',`Modern HTTP setup (${S.http.score}/100)`,'HTTP/2+, compression and key headers in place.');
 
   // ── Typosquatting ──
   if(S.typosquat?.results){
     const reg=S.typosquat.results.filter(r=>r.registered).length;
-    if(reg>0) add('low',`${reg} look-alike domain${reg!==1?'s':''} registered`,'Potential typosquats are registered — monitor for phishing/brand abuse.','typosquat');
+    if(reg>0) add('typosquat-found','low',`${reg} look-alike domain${reg!==1?'s':''} registered`,'Potential typosquats are registered — monitor for phishing/brand abuse.');
+    else add('typosquat-clean','good','No typosquats registered',`${S.typosquat.total||S.typosquat.results.length} look-alike variants checked — none registered.`);
   }
 
   f.sort((a,b)=>SEV_RANK[a.sev]-SEV_RANK[b.sev]);
@@ -2511,6 +3084,23 @@ function collectFindings(){
 }
 
 const SEV_LABEL = { crit:'Critical', high:'High', med:'Medium', low:'Low', good:'Pass' };
+// One finding row (used for both the issue list and the collapsed passed list).
+function scItem(x){
+  const domain=$('currentDomain')?.textContent||'';
+  const snippet=x.snippet?x.snippet(domain):null;
+  return `<div class="sc-item ${x.sev}">
+    <span class="sc-sev ${x.sev}">${SEV_LABEL[x.sev]}</span>
+    <div class="sc-body">
+      <div class="sc-item-title">${esc(x.title)}</div>
+      <div class="sc-item-detail">${esc(x.detail)}</div>
+      ${x.fix && x.sev!=='good'?`<div class="sc-item-fix"><span class="sc-fix-lbl">Fix:</span> ${esc(x.fix)}</div>`:''}
+    </div>
+    <div class="sc-item-actions">
+      ${snippet?`<button class="sc-view" data-copy="${escAttr(snippet)}" onclick="cpEl(this)" title="Copy a ready-to-paste record/header">Copy fix</button>`:''}
+      ${x.tab?`<button class="sc-view" onclick="deepLinkTab('${esc(x.tab)}')">View →</button>`:''}
+    </div>
+  </div>`;
+}
 function renderScorecard(){
   const el=$('scorecard'); if(!el) return;
   const findings=collectFindings();
@@ -2532,17 +3122,38 @@ function renderScorecard(){
   const countPill=(sev,cls,label)=>counts[sev]
     ? `<span class="sc-count ${cls}"><span class="dot"></span>${counts[sev]} ${label}</span>` : '';
 
-  const items=findings.map(x=>{
-    const sevCls=x.sev;
-    return `<div class="sc-item ${sevCls}">
-      <span class="sc-sev ${sevCls}">${SEV_LABEL[x.sev]}</span>
-      <div class="sc-body">
-        <div class="sc-item-title">${esc(x.title)}</div>
-        <div class="sc-item-detail">${esc(x.detail)}</div>
-      </div>
-      ${x.tab?`<button class="sc-view" onclick="deepLinkTab('${esc(x.tab)}')">View →</button>`:''}
-    </div>`;
-  }).join('');
+  const issues=findings.filter(x=>x.sev!=='good');
+  const passed=findings.filter(x=>x.sev==='good');
+
+  // Top 3 actions — the first (most severe) issues, numbered, with their fixes.
+  const top3=issues.slice(0,3);
+  const top3Html=top3.length?`<div class="sc-top3">
+    <div class="sc-top3-title">Top ${top3.length===1?'action':top3.length+' actions'} to improve this domain</div>
+    ${top3.map((x,i)=>{
+      const domain=$('currentDomain')?.textContent||'';
+      const snippet=x.snippet?x.snippet(domain):null;
+      return `<div class="sc-top3-item">
+        <span class="sc-top3-num">${i+1}</span>
+        <div class="sc-body">
+          <div class="sc-item-title">${esc(x.title)}</div>
+          ${x.fix?`<div class="sc-item-fix">${esc(x.fix)}</div>`:''}
+        </div>
+        <div class="sc-item-actions">
+          ${snippet?`<button class="sc-view" data-copy="${escAttr(snippet)}" onclick="cpEl(this)">Copy fix</button>`:''}
+          ${x.tab?`<button class="sc-view" onclick="deepLinkTab('${esc(x.tab)}')">View →</button>`:''}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`:'';
+
+  const issueList=issues.length>3?`<div class="sc-list">${issues.slice(3).map(scItem).join('')}</div>`:'';
+  const passedHtml=passed.length?`<details class="sc-passed">
+    <summary>${passed.length} check${passed.length!==1?'s':''} passed</summary>
+    <div class="sc-list">${passed.map(scItem).join('')}</div>
+  </details>`:'';
+
+  const allClear=!issues.length && !analyzing
+    ? `<div class="sc-allclear">All clear — no issues found across ${findings.length} evaluated checks.</div>`:'';
 
   const gradeTxt=h?`${h.grade} · ${h.pct}/100`:'—';
   el.innerHTML=`
@@ -2557,7 +3168,10 @@ function renderScorecard(){
       </div>
     </div>
     ${analyzing?`<div class="sc-scanning"><span class="load-spinner" style="width:14px;height:14px;border-width:2px"></span>Still analyzing — more findings may appear…</div>`:''}
-    <div class="sc-list">${items}</div>
+    ${allClear}
+    ${top3Html}
+    ${issueList}
+    ${passedHtml}
     <div class="sc-badge-row">
       <span class="sc-badge-lbl">Grade: <strong style="color:${h?h.gc:'var(--text)'}">${gradeTxt}</strong></span>
       <button class="sc-view" onclick="copyBadge()" title="Copy a Markdown status badge for your README">Copy badge</button>
@@ -2657,8 +3271,9 @@ function openCompare(){
   renderHistory();
   ov.classList.add('open');
   if(window.lucide) lucide.createIcons({ root: ov });
+  trapFocus(ov);
 }
-function closeCompare(){ $('cmpOverlay').classList.remove('open'); }
+function closeCompare(){ const o=$('cmpOverlay'); if(o.classList.contains('open')){ o.classList.remove('open'); releaseFocus(); } }
 
 const CMP_METRICS=[
   ['Health score','pct',(v)=>v==null?'—':v+'/100','higher'],
@@ -2929,8 +3544,9 @@ function openMonitor(){
   $('monOverlay').classList.add('open');
   if(window.lucide) lucide.createIcons({ root: $('monOverlay') });
   if(getWatch().length) refreshMonitor(true);  // silent freshen on open
+  trapFocus($('monOverlay'));
 }
-function closeMonitor(){ $('monOverlay').classList.remove('open'); }
+function closeMonitor(){ const o=$('monOverlay'); if(o.classList.contains('open')){ o.classList.remove('open'); releaseFocus(); } }
 
 // ── Alert delivery & developer API (signed-in account panel) ───
 async function renderAccountPanel(){
@@ -2992,8 +3608,8 @@ async function deleteKey(key){
 
 // ── Bulk / multi-domain scan ───────────────────────────────────
 let bulkResults=[];
-function openBulk(){ $('bulkResults').innerHTML=''; $('bulkOverlay').classList.add('open'); if(window.lucide) lucide.createIcons({ root: $('bulkOverlay') }); setTimeout(()=>$('bulkText')?.focus(),50); }
-function closeBulk(){ $('bulkOverlay').classList.remove('open'); }
+function openBulk(){ $('bulkResults').innerHTML=''; $('bulkOverlay').classList.add('open'); if(window.lucide) lucide.createIcons({ root: $('bulkOverlay') }); trapFocus($('bulkOverlay')); }
+function closeBulk(){ const o=$('bulkOverlay'); if(o.classList.contains('open')){ o.classList.remove('open'); releaseFocus(); } }
 
 async function bulkGrade(domain){
   const [dns,ssl,email,bl]=await Promise.all([
@@ -3002,14 +3618,10 @@ async function bulkGrade(domain){
     fetchJSON('/api/email-security',{domain}).catch(()=>({error:1})),
     fetchJSON('/api/blacklist-check',{domain}).catch(()=>({error:1})),
   ]);
-  let pts=0,tot=0;
-  if(dns&&!dns.error&&dns.insights?.checks){ const c=dns.insights.checks; pts+=(c.spf?15:0)+(c.dmarc?15:0)+(c.caa?10:0)+(c.mx?10:0); tot+=50; }
-  if(email&&!email.error&&typeof email.overallScore==='number'){ pts+=Math.round(email.overallScore*0.2); tot+=20; }
-  let sslDays=null; if(ssl&&!ssl.error){ sslDays=ssl.certificate?.daysRemaining??null; pts+=sslDays>90?30:sslDays>30?20:sslDays>0?10:0; tot+=30; }
-  let listed=null; if(bl&&!bl.error&&bl.results){ listed=bl.results.some(r=>r.listed); pts+=listed?0:10; tot+=10; }
-  const pct=tot?Math.round(pts/tot*100):null;
-  const grade=pct==null?'—':pct>=95?'A+':pct>=85?'A':pct>=70?'B':pct>=50?'C':'D';
-  return {domain, pct, grade, sslDays, blacklisted:listed, tls:(ssl&&!ssl.error)?(ssl.grade?.letter||null):null};
+  const h=HetOpsScore.computeHealthScore({dns, ssl, emailsec:email, blacklist:bl});
+  const sslDays=(ssl&&!ssl.error)?(ssl.certificate?.daysRemaining??null):null;
+  const listed=(bl&&!bl.error&&bl.results)?bl.results.some(r=>r.listed):null;
+  return {domain, pct:h?h.pct:null, grade:h?h.grade:'—', sslDays, blacklisted:listed, tls:(ssl&&!ssl.error)?(ssl.grade?.letter||null):null};
 }
 async function runBulk(){
   const domains=[...new Set($('bulkText').value.split(/[\n,\s]+/).map(d=>norm(d)).filter(Boolean))].slice(0,25);
@@ -3091,7 +3703,15 @@ async function checkAuth(){
   if(currentUser){ await pullServerData(); }
 }
 
-function closeMobileNav(){ document.getElementById('mobileNavOverlay')?.classList.remove('open'); }
+function openMobileNav(){
+  document.getElementById('mobileNavOverlay').classList.add('open');
+  $('mobileNavBtn')?.setAttribute('aria-expanded','true');
+  trapFocus(document.getElementById('mobileNavOverlay'));
+}
+function closeMobileNav(){
+  const o=document.getElementById('mobileNavOverlay');
+  if(o?.classList.contains('open')){ o.classList.remove('open'); $('mobileNavBtn')?.setAttribute('aria-expanded','false'); releaseFocus(); }
+}
 function openLogin(){
   closeMobileNav();  // ensure the login modal isn't hidden behind the mobile menu
   $('loginBody').innerHTML=`<p style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:16px">Sign in with a magic link to save your scan history across devices and receive email alerts for domains you monitor. No password required.</p>
@@ -3100,9 +3720,9 @@ function openLogin(){
       <button type="submit" class="btn-analyze" id="loginSubmit" style="width:100%">Send magic link →</button>
     </form>`;
   $('loginOverlay').classList.add('open');
-  setTimeout(()=>$('loginEmail')?.focus(),50);
+  trapFocus($('loginOverlay'));
 }
-function closeLogin(){ $('loginOverlay').classList.remove('open'); }
+function closeLogin(){ const o=$('loginOverlay'); if(o.classList.contains('open')){ o.classList.remove('open'); releaseFocus(); } }
 
 async function submitLogin(e){
   e.preventDefault();
@@ -3684,9 +4304,12 @@ function emailSecStat(d){
 }
 
 // ── Tab Health Indicators ──────────────────────────────────────
+const HEALTH_TEXT={ ok:'no issues', warn:'needs attention', err:'problems found' };
 function setTabHealth(cat,status){
   const el=$('health-'+cat);
-  if(el){ el.className='tab-health '+status; }
+  if(el){ el.className='tab-health '+status;
+    el.setAttribute('role','img');
+    el.setAttribute('aria-label', (HEALTH_TEXT[status]||status)); }
 }
 function updateTabHealth(){
   // Core: DNS records present
@@ -4134,6 +4757,31 @@ $('monOverlay').addEventListener('click', e=>{ if(e.target.id==='monOverlay') cl
 $('loginOverlay').addEventListener('click', e=>{ if(e.target.id==='loginOverlay') closeLogin(); });
 $('bulkOverlay').addEventListener('click', e=>{ if(e.target.id==='bulkOverlay') closeBulk(); });
 
+// ── Plain-language explainers on every result pane ───────────────────────
+initExplainers();
+
+// ── Tab semantics + keyboard navigation ─────────────────────────────────
+// Give the category and sub-tab strips proper ARIA roles and Left/Right arrow
+// movement (WAI-ARIA tab pattern), so the whole report is keyboard-navigable.
+(function initTabA11y(){
+  document.querySelectorAll('.cat-tabs, .sub-tabs-group').forEach(strip=>{
+    strip.setAttribute('role','tablist');
+    strip.querySelectorAll('button').forEach(b=>{
+      b.setAttribute('role','tab');
+      if(!b.hasAttribute('aria-selected')) b.setAttribute('aria-selected','false');
+    });
+    strip.addEventListener('keydown', e=>{
+      if(e.key!=='ArrowRight' && e.key!=='ArrowLeft') return;
+      const btns=[...strip.querySelectorAll('button')].filter(b=>b.offsetParent!==null);
+      const i=btns.indexOf(document.activeElement);
+      if(i<0) return;
+      e.preventDefault();
+      const next=e.key==='ArrowRight' ? (i+1)%btns.length : (i-1+btns.length)%btns.length;
+      btns[next].focus(); btns[next].click();
+    });
+  });
+})();
+
 // ── URL query param auto-run (?q=domain / ?domain=domain / &tab=ssl) ─────
 (function(){
   const p=new URLSearchParams(window.location.search);
@@ -4145,7 +4793,7 @@ $('bulkOverlay').addEventListener('click', e=>{ if(e.target.id==='bulkOverlay') 
 function downloadCert(index){
   const chain=S.ssl?.certificate?.chain||[];
   const cert=chain[index];
-  if(!cert?.pem){ alert('Certificate PEM data not available'); return; }
+  if(!cert?.pem){ toast('Certificate PEM data not available','warn'); return; }
   const filename=`${cert.subject?.CN||'certificate'}_${index}.pem`.replace(/[^a-z0-9._-]/gi,'_');
   downloadFile(cert.pem,filename,'application/x-pem-file');
 }
@@ -4153,7 +4801,7 @@ function downloadCert(index){
 function downloadFullChain(){
   const chain=S.ssl?.certificate?.chain||[];
   const pemData=chain.map(c=>c.pem).filter(Boolean).join('\n');
-  if(!pemData){ alert('Certificate chain PEM data not available'); return; }
+  if(!pemData){ toast('Certificate chain PEM data not available','warn'); return; }
   const domain=S.ssl?.host||'certificates';
   const filename=`${domain}_chain.pem`.replace(/[^a-z0-9._-]/gi,'_');
   downloadFile(pemData,filename,'application/x-pem-file');

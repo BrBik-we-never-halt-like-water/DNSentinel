@@ -54,7 +54,7 @@
     <p class="lead">Programmatic domain intelligence over a simple JSON API — DNS, WHOIS, SSL/TLS, security headers, DNSSEC, global propagation, GeoIP, ports, email authentication and more. Free, no key required for normal use.</p>
 
     <div class="toc">
-      <a href="#basics">Basics</a><a href="#keys">API keys</a><a href="#limits">Rate limits</a>
+      <a href="#basics">Basics</a><a href="#scan">Aggregate scan</a><a href="#keys">API keys</a><a href="#limits">Rate limits</a>
       <a href="#endpoints">Endpoints</a><a href="#badge">Status badge</a><a href="#errors">Errors</a>
     </div>
 
@@ -64,35 +64,90 @@
   -H <span class="s">"Content-Type: application/json"</span> \
   -d <span class="s">'{"domain":"github.com"}'</span></pre>
 
+    <h2 id="scan">Aggregate scan</h2>
+    <p>One call that runs the core checks and returns the overall health summary — built for scripts and CI pipelines. Optional <code>checks</code> array narrows the run.</p>
+    <pre><span class="k">curl</span> -X POST https://dns.hetops.dev/api/scan \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"domain":"github.com"}'</span>
+
+<span class="k">// response shape</span>
+{
+  "domain": "github.com",
+  "durationMs": 4200,
+  "checks": ["dns-lookup", "ssl", "email-security", "blacklist-check", "whois"],
+  "results": { "dns-lookup": { ... }, "ssl": { ... }, ... },
+  "summary": { "pct": 92, "grade": "A", "breakdown": [ ... ] }
+}</pre>
+    <p>Available <code>checks</code> values: <code>dns-lookup</code>, <code>ssl</code>, <code>email-security</code>, <code>blacklist-check</code>, <code>whois</code>. The <code>summary</code> uses the same weighting as the app's health score and the badge (DNS hygiene 50 · email 20 · TLS 30 · blacklist 10). A check that fails returns <code>{ "error": "..." }</code> in its slot without failing the whole scan.</p>
+
     <h2 id="keys">API keys</h2>
-    <p>Keys are optional — they exempt you from the shared IP rate limit. Create one from the app (sign in → your account → API keys), then pass it as a header:</p>
+    <p>Keys are optional — they give you a dedicated, much larger quota instead of the shared per-IP limit. Create one from the app (sign in → your account → API keys), then pass it as a header:</p>
     <pre>-H <span class="s">"X-API-Key: hk_xxxxxxxxxxxx"</span></pre>
 
     <h2 id="limits">Rate limits</h2>
-    <p>Without a key: shared per-IP limit (generous — about 20 full analyses/minute). With a valid <code>X-API-Key</code>: the per-IP limit is skipped. Responses are cached server-side (~5&nbsp;min) so repeat lookups are instant and don't count against limits. Requests to private/internal addresses are rejected (403).</p>
+    <p>Without a key: shared per-IP limit (generous — about 20 full analyses/minute). With a valid <code>X-API-Key</code>: a per-key quota roughly 4× the anonymous limit. Responses are cached server-side (~5&nbsp;min) so repeat lookups are instant and don't count against limits. Requests to private/internal addresses are rejected (403).</p>
 
     <h2 id="endpoints">Endpoints</h2>
-    <p>Every endpoint below is <span class="method post">POST</span> with body <code>{ "domain": "&lt;host&gt;" }</code>.</p>
+    <p>Every endpoint below is <span class="method post">POST</span> with body <code>{ "domain": "&lt;host&gt;" }</code> unless noted.</p>
+    <h3>Core</h3>
     <table>
       <tr><th>Path</th><th>Returns</th></tr>
-      <tr><td>/api/dns-lookup</td><td>A/AAAA/MX/TXT/NS/CNAME/SOA/CAA/SRV records + insights</td></tr>
-      <tr><td>/api/whois</td><td>WHOIS / RDAP registration data</td></tr>
-      <tr><td>/api/ssl</td><td>Certificate, chain, protocols, ciphers, vulnerabilities, grade</td></tr>
-      <tr><td>/api/security-headers</td><td>HTTP security header analysis</td></tr>
-      <tr><td>/api/dnssec</td><td>DNSSEC configuration &amp; chain of trust</td></tr>
-      <tr><td>/api/blacklist-check</td><td>DNSBL reputation across major lists</td></tr>
-      <tr><td>/api/propagation</td><td>Global DNS propagation across resolvers</td></tr>
-      <tr><td>/api/email-security</td><td>SPF, DKIM, DMARC, BIMI analysis &amp; score</td></tr>
+      <tr><td>/api/scan</td><td>Aggregate: core checks + health summary (see above)</td></tr>
+      <tr><td>/api/dns-lookup</td><td>A/AAAA/MX/TXT/NS/CNAME/SOA/CAA/SRV/PTR records + insights. Also accepts <code>domains</code> (array, ≤20), <code>types</code>, <code>resolver</code>, <code>compareAuthoritative</code>, <code>discoverSubdomains</code></td></tr>
+      <tr><td>/api/whois</td><td>Registration data — RDAP first with WHOIS fallback; includes structured <code>expiresAt</code> when available</td></tr>
       <tr><td>/api/geoip</td><td>IP geolocation &amp; network info</td></tr>
-      <tr><td>/api/port-scan</td><td>Common-port reachability scan</td></tr>
-      <tr><td>/api/http</td><td>HTTP/2/3, headers, redirects, features</td></tr>
-      <tr><td>/api/tech</td><td>Technology / stack fingerprinting</td></tr>
-      <tr><td>/api/cert-transparency</td><td>Certificate Transparency log entries</td></tr>
-      <tr><td>/api/subdomain-takeover</td><td>Dangling-CNAME takeover checks</td></tr>
-      <tr><td>/api/typosquat</td><td>Registered look-alike domains</td></tr>
-      <tr><td>/api/mta-sts</td><td>MTA-STS &amp; DANE</td></tr>
+      <tr><td>/api/propagation</td><td>Global DNS propagation across resolvers. Accepts <code>type</code></td></tr>
+    </table>
+    <h3>Security</h3>
+    <table>
+      <tr><th>Path</th><th>Returns</th></tr>
+      <tr><td>/api/ssl</td><td>Certificate, chain, protocols, ciphers, vulnerabilities, grade</td></tr>
+      <tr><td>/api/ssl-labs</td><td>SSL-Labs-style grade only</td></tr>
+      <tr><td>/api/security-headers</td><td>HTTP security header analysis &amp; score</td></tr>
+      <tr><td>/api/csp-analyzer</td><td>Content-Security-Policy directive analysis &amp; grade</td></tr>
+      <tr><td>/api/dnssec</td><td>DNSSEC configuration</td></tr>
+      <tr><td>/api/dnssec-chain</td><td>Full DNSSEC chain of trust (root → TLD → zone)</td></tr>
+      <tr><td>/api/ocsp</td><td>OCSP stapling &amp; revocation status</td></tr>
       <tr><td>/api/hsts-preload</td><td>HSTS preload eligibility</td></tr>
-      <tr><td>/api/ipv6</td><td>IPv6 reachability</td></tr>
+      <tr><td>/api/subdomain-takeover</td><td>Dangling-CNAME takeover checks</td></tr>
+      <tr><td>/api/blacklist-check</td><td>DNSBL reputation across major lists</td></tr>
+    </table>
+    <h3>Email</h3>
+    <table>
+      <tr><th>Path</th><th>Returns</th></tr>
+      <tr><td>/api/email-security</td><td>SPF, DKIM, DMARC, BIMI analysis &amp; score. Accepts <code>selectors</code> (array, ≤20 extra DKIM selectors)</td></tr>
+      <tr><td>/api/mx-smtp</td><td>MX topology &amp; SMTP banner/TLS analysis</td></tr>
+      <tr><td>/api/mta-sts</td><td>MTA-STS policy &amp; DANE/TLSA</td></tr>
+    </table>
+    <h3>Network &amp; web</h3>
+    <table>
+      <tr><th>Path</th><th>Returns</th></tr>
+      <tr><td>/api/ipv6</td><td>IPv4/IPv6 dual-stack &amp; reachability</td></tr>
+      <tr><td>/api/trace</td><td>Traceroute-style path analysis</td></tr>
+      <tr><td>/api/port-scan</td><td>Port reachability. Accepts <code>ports</code> (array, ≤30)</td></tr>
+      <tr><td>/api/http</td><td>HTTP/2/3, compression, features &amp; score</td></tr>
+      <tr><td>/api/redirect</td><td>Redirect chain trace</td></tr>
+      <tr><td>/api/tech</td><td>Technology / stack fingerprinting</td></tr>
+      <tr><td>/api/cors</td><td>CORS policy analysis</td></tr>
+      <tr><td>/api/cookies</td><td>Cookie security flags</td></tr>
+      <tr><td>/api/robots</td><td>robots.txt &amp; sitemap</td></tr>
+      <tr><td>/api/sshfp</td><td>SSHFP records</td></tr>
+    </table>
+    <h3>Intelligence</h3>
+    <table>
+      <tr><th>Path</th><th>Returns</th></tr>
+      <tr><td>/api/cert-transparency</td><td>Certificate Transparency log entries</td></tr>
+      <tr><td>/api/typosquat</td><td>Registered look-alike domains</td></tr>
+    </table>
+    <h3>Account (session cookie required)</h3>
+    <table>
+      <tr><th>Path</th><th>Purpose</th></tr>
+      <tr><td>POST /api/auth/request</td><td>Email a magic sign-in link — body <code>{ "email": "you@example.com" }</code></td></tr>
+      <tr><td>GET /api/auth/me</td><td>Current session info</td></tr>
+      <tr><td>GET|POST|DELETE /api/history</td><td>Scan history sync</td></tr>
+      <tr><td>GET|POST /api/alerts, DELETE /api/alerts/:domain</td><td>Monitoring watchlist (≤50 domains)</td></tr>
+      <tr><td>GET|POST /api/settings</td><td>Webhook URL &amp; weekly digest</td></tr>
+      <tr><td>GET|POST /api/keys, DELETE /api/keys/:key</td><td>API key management (≤10 keys)</td></tr>
     </table>
 
     <h2 id="badge">Status badge</h2>

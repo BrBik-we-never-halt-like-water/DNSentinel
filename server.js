@@ -13,6 +13,10 @@ const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const store = require('./db');
 const mailer = require('./email');
+const VERSION = require('./package.json').version;
+// Shared with the browser (served from /shared/health-score.js) so the badge,
+// /api/scan summary and the UI score ring all use one formula.
+const { computeHealthScore } = require('./public/shared/health-score');
 
 
 function fetchIntermediateCerts(leafCert, timeout = 5000) {
@@ -298,29 +302,35 @@ app.use((req, res, next) => {
   next();
 });
 
-app.set('trust proxy', 2);
+// One trusted hop (Traefik/Coolify) by default; override with TRUST_PROXY when the
+// chain is deeper. Trusting too many hops lets clients spoof X-Forwarded-For and
+// evade per-IP rate limits.
+app.set('trust proxy', Number(process.env.TRUST_PROXY) || 1);
 
 // A single full analysis fans out ~28 API calls. Limits are sized so a user can
 // run ~20 back-to-back analyses per minute before throttling kicks in, while
 // still protecting the server from abuse. Cache hits (below) bypass these.
-// Requests authenticated with a valid API key skip the shared IP rate limits.
+// Requests with a valid API key get their own, larger per-key quota (they used
+// to bypass the limiter entirely, which let one leaked key soak the server).
+const { ipKeyGenerator } = require('express-rate-limit');
 const hasValidApiKey = (req) => { try { return store.apiKeyExists(req.get('X-API-Key')); } catch { return false; } };
+const keyOrIp = (req) => (hasValidApiKey(req) ? 'key:' + req.get('X-API-Key') : ipKeyGenerator(req.ip));
 
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 1500,
+  max: (req) => (hasValidApiKey(req) ? 6000 : 1500),
   standardHeaders: true,
   legacyHeaders: false,
-  skip: hasValidApiKey,
+  keyGenerator: keyOrIp,
   message: { error: 'Too many requests. Please retry in a minute.' }
 });
 
 const heavyApiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 600,
+  max: (req) => (hasValidApiKey(req) ? 2400 : 600),
   standardHeaders: true,
   legacyHeaders: false,
-  skip: hasValidApiKey,
+  keyGenerator: keyOrIp,
   message: { error: 'Rate limit exceeded for intensive checks. Please slow down.' }
 });
 
@@ -337,14 +347,23 @@ const responseCache = new Map(); // key -> { body, status, expires }
 // would serve one user's data to another.
 // NOTE: these run inside app.use('/api', ...) middleware, where Express strips the
 // '/api' mount prefix from req.path — so match against the un-prefixed paths.
-const NON_CACHEABLE = ['/auth', '/history', '/alerts'];
+const NON_CACHEABLE = ['/auth', '/history', '/alerts', '/settings', '/keys'];
+// Body fields that change a lookup's result. They MUST be part of the cache key,
+// otherwise e.g. {types:['A']} and {types:['MX']} would cross-serve each other.
+const CACHE_KEY_FIELDS = [
+  'resolver', 'type', 'types', 'ports', 'domains', 'selectors',
+  'compareAuthoritative', 'discoverSubdomains', 'discoveryWordlist'
+];
 function cacheKeyFor(req) {
   if (req.method !== 'POST') return null;
   if (NON_CACHEABLE.some((p) => req.path.startsWith(p))) return null;
   const b = req.body || {};
   const domain = normalizeDomain(b.domain || '');
   if (!domain) return null; // only cache deterministic single-domain lookups
-  const extra = [b.resolver, b.type].filter(Boolean).join('|');
+  const extra = CACHE_KEY_FIELDS
+    .filter((f) => b[f] !== undefined && b[f] !== null && b[f] !== '')
+    .map((f) => `${f}=${JSON.stringify(b[f])}`)
+    .join('|');
   return `${req.path}::${domain}::${extra}`;
 }
 
@@ -491,9 +510,13 @@ async function hostIsBlocked(host) {
 async function ssrfGuard(req, res, next) {
   if (req.method !== 'POST') return next();
   if (NON_CACHEABLE.some((p) => req.path.startsWith(p))) return next(); // not outbound
-  const host = normalizeDomain((req.body && req.body.domain) || '');
-  if (host && await hostIsBlocked(host)) {
-    return res.status(403).json({ error: 'Target host is not permitted (private/internal address).' });
+  const b = req.body || {};
+  // Multi-domain endpoints accept a `domains` list too — every target must pass.
+  const hosts = parseDomains(normalizeDomain(b.domain || ''), b.domains);
+  for (const host of hosts) {
+    if (await hostIsBlocked(host)) {
+      return res.status(403).json({ error: 'Target host is not permitted (private/internal address).' });
+    }
   }
   next();
 }
@@ -997,11 +1020,43 @@ app.post('/api/port-scan', heavyApiLimiter, async (req, res) => {
   }
 });
 
-app.post('/api/whois', heavyApiLimiter, async (req, res) => {
-  const { domain } = req.body;
-  if (!domain || typeof domain !== 'string' || domain.length > 256) return res.status(400).json({ error: 'Valid domain is required' });
-  const host = normalizeDomain(domain);
-  if (!host) return res.status(400).json({ error: 'Invalid domain format' });
+// RDAP is the registries' structured successor to WHOIS: no per-IP rate-limit
+// games, machine-readable dates. Query it first and only fall back to the legacy
+// whois protocol when RDAP has no data for the TLD.
+async function rdapLookup(host) {
+  try {
+    const rdapReq = await fetch(`https://rdap.org/domain/${host}`, { headers: { 'Accept': 'application/rdap+json' }, signal: AbortSignal.timeout(5000) });
+    if (!rdapReq.ok) return null;
+    const rdapData = await rdapReq.json();
+    const lines = [];
+    let expiresAt = null;
+    if (rdapData.ldhName) lines.push(`Domain Name: ${rdapData.ldhName}`);
+    if (rdapData.handle) lines.push(`Registry Domain ID: ${rdapData.handle}`);
+    (rdapData.events || []).forEach(e => {
+      if (e.eventAction === 'registration') lines.push(`Creation Date: ${e.eventDate}`);
+      if (e.eventAction === 'expiration') { lines.push(`Registry Expiry Date: ${e.eventDate}`); expiresAt = e.eventDate; }
+      if (e.eventAction === 'last changed') lines.push(`Updated Date: ${e.eventDate}`);
+    });
+    (rdapData.status || []).forEach(s => lines.push(`Domain Status: ${s}`));
+    (rdapData.nameservers || []).forEach(ns => lines.push(`Name Server: ${ns.ldhName}`));
+    (rdapData.entities || []).forEach(ent => {
+      if (ent.roles && ent.roles.includes('registrar')) {
+        const vcard = ent.vcardArray && ent.vcardArray[1];
+        if (vcard) { const fn = vcard.find(item => item[0] === 'fn'); if (fn) lines.push(`Registrar: ${fn[3]}`); }
+        if (ent.publicIds) { const iana = ent.publicIds.find(id => id.type === 'IANA Registrar ID'); if (iana) lines.push(`Registrar IANA ID: ${iana.identifier}`); }
+      }
+    });
+    // A bare handle with no events/nameservers means rdap.org had nothing useful.
+    if (lines.length < 3) return null;
+    return { domain: host, source: 'rdap', expiresAt, rawData: lines.join('\n') };
+  } catch {
+    return null;
+  }
+}
+
+async function runWhoisCheck(host) {
+  const fromRdap = await rdapLookup(host);
+  if (fromRdap) return fromRdap;
 
   const whoisPromise = new Promise((resolve, reject) => {
     whois.lookup(host, { follow: 1 }, (err, data) => {
@@ -1009,42 +1064,19 @@ app.post('/api/whois', heavyApiLimiter, async (req, res) => {
       else resolve(data);
     });
   });
-
   const timer = new Promise((_, reject) => setTimeout(() => reject(new Error('Whois lookup timed out')), 8000));
+  const data = await Promise.race([whoisPromise, timer]);
+  return { domain: host, source: 'whois', expiresAt: null, rawData: data };
+}
+
+app.post('/api/whois', heavyApiLimiter, async (req, res) => {
+  const { domain } = req.body;
+  if (!domain || typeof domain !== 'string' || domain.length > 256) return res.status(400).json({ error: 'Valid domain is required' });
+  const host = normalizeDomain(domain);
+  if (!host) return res.status(400).json({ error: 'Invalid domain format' });
 
   try {
-    let data = await Promise.race([whoisPromise, timer]);
-    
-    if (typeof data === 'string' && (data.toLowerCase().includes('rate limit exceeded') || data.toLowerCase().includes('server is being retired') || data.toLowerCase().includes('connection refused'))) {
-      try {
-        const rdapReq = await fetch(`https://rdap.org/domain/${host}`, { headers: { 'Accept': 'application/rdap+json' }, signal: AbortSignal.timeout(5000) });
-        if (rdapReq.ok) {
-          const rdapData = await rdapReq.json();
-          let lines = [];
-          if (rdapData.ldhName) lines.push(`Domain Name: ${rdapData.ldhName}`);
-          if (rdapData.handle) lines.push(`Registry Domain ID: ${rdapData.handle}`);
-          (rdapData.events || []).forEach(e => {
-            if (e.eventAction === 'registration') lines.push(`Creation Date: ${e.eventDate}`);
-            if (e.eventAction === 'expiration') lines.push(`Registry Expiry Date: ${e.eventDate}`);
-            if (e.eventAction === 'last changed') lines.push(`Updated Date: ${e.eventDate}`);
-          });
-          (rdapData.status || []).forEach(s => lines.push(`Domain Status: ${s}`));
-          (rdapData.nameservers || []).forEach(ns => lines.push(`Name Server: ${ns.ldhName}`));
-          (rdapData.entities || []).forEach(ent => {
-            if (ent.roles && ent.roles.includes('registrar')) {
-              const vcard = ent.vcardArray && ent.vcardArray[1];
-              if (vcard) { const fn = vcard.find(item => item[0] === 'fn'); if (fn) lines.push(`Registrar: ${fn[3]}`); }
-              if (ent.publicIds) { const iana = ent.publicIds.find(id => id.type === 'IANA Registrar ID'); if (iana) lines.push(`Registrar IANA ID: ${iana.identifier}`); }
-            }
-          });
-          data = lines.join('\n') + '\n\n--- ORIGINAL BLOCKED RESPONSE ---\n\n' + data;
-        }
-      } catch (e) {
-        // Continue silently if fallback fails
-      }
-    }
-
-    res.json({ domain: host, rawData: data });
+    res.json(await runWhoisCheck(host));
   } catch (err) {
     res.status(500).json({ error: err.message || 'Whois lookup failed' });
   }
@@ -1106,12 +1138,7 @@ app.post('/api/geoip', heavyApiLimiter, async (req, res) => {
   });
 });
 
-app.post('/api/blacklist-check', heavyApiLimiter, async (req, res) => {
-  const { domain } = req.body;
-  if (!domain || typeof domain !== 'string' || domain.length > 256) return res.status(400).json({ error: 'Valid domain is required' });
-  const host = normalizeDomain(domain);
-  if (!host) return res.status(400).json({ error: 'Invalid domain format' });
-
+async function runBlacklistCheck(host) {
   // Only include reputable IP-based DNSBLs with low false-positive rates.
   // Notes on excluded lists:
   //   xbl/sbl.spamhaus.org — already included inside zen.spamhaus.org (duplicates)
@@ -1143,38 +1170,49 @@ app.post('/api/blacklist-check', heavyApiLimiter, async (req, res) => {
   } catch (err) {}
 
   ips = [...new Set(ips)];
-  if (!ips.length) return res.json({ domain: host, error: 'No IPs found to check for blacklist.' });
+  // Same 200 {error} shape the route has always returned so consumers'
+  // `.error` checks keep working when a domain simply has no A/MX records.
+  if (!ips.length) return { domain: host, error: 'No IPs found to check for blacklist.' };
 
   const results = [];
-  try {
-    await Promise.all(ips.slice(0, 5).map(async (ip) => { // Limit to 5 IPs check
-      const reversedIp = ip.split('.').reverse().join('.');
-      await Promise.all(blacklists.map(async (bl) => {
-        const query = `${reversedIp}.${bl}`;
-        try {
-          const addresses = await resolver.resolve4(query);
-          // Spamhaus and other DNSBLs return 127.255.255.254 or 127.255.255.255 
-          // to indicate that you are blocked from querying them (usually because
-          // you are using a public DNS resolver like 8.8.8.8 or 1.1.1.1).
-          // We must NOT treat these as "listed" hits.
-          const isBlockedQuery = addresses.some(ip => ip === '127.255.255.254' || ip === '127.255.255.255');
-          
-          if (isBlockedQuery) {
-            results.push({ ip, blacklist: bl, listed: false, error: 'Query Limit/Blocked by Public DNS' });
-          } else {
-            results.push({ ip, blacklist: bl, listed: true, details: addresses });
-          }
-        } catch (err) {
-          if (err.code === 'ENOTFOUND') {
-            results.push({ ip, blacklist: bl, listed: false });
-          } else {
-            results.push({ ip, blacklist: bl, listed: false, error: err.code });
-          }
+  await Promise.all(ips.slice(0, 5).map(async (ip) => { // Limit to 5 IPs check
+    const reversedIp = ip.split('.').reverse().join('.');
+    await Promise.all(blacklists.map(async (bl) => {
+      const query = `${reversedIp}.${bl}`;
+      try {
+        const addresses = await resolver.resolve4(query);
+        // Spamhaus and other DNSBLs return 127.255.255.254 or 127.255.255.255
+        // to indicate that you are blocked from querying them (usually because
+        // you are using a public DNS resolver like 8.8.8.8 or 1.1.1.1).
+        // We must NOT treat these as "listed" hits.
+        const isBlockedQuery = addresses.some(ip => ip === '127.255.255.254' || ip === '127.255.255.255');
+
+        if (isBlockedQuery) {
+          results.push({ ip, blacklist: bl, listed: false, error: 'Query Limit/Blocked by Public DNS' });
+        } else {
+          results.push({ ip, blacklist: bl, listed: true, details: addresses });
         }
-      }));
+      } catch (err) {
+        if (err.code === 'ENOTFOUND') {
+          results.push({ ip, blacklist: bl, listed: false });
+        } else {
+          results.push({ ip, blacklist: bl, listed: false, error: err.code });
+        }
+      }
     }));
-    res.json({ domain: host, IPsChecked: ips.length, results });
-  } catch(err) {
+  }));
+  return { domain: host, IPsChecked: ips.length, results };
+}
+
+app.post('/api/blacklist-check', heavyApiLimiter, async (req, res) => {
+  const { domain } = req.body;
+  if (!domain || typeof domain !== 'string' || domain.length > 256) return res.status(400).json({ error: 'Valid domain is required' });
+  const host = normalizeDomain(domain);
+  if (!host) return res.status(400).json({ error: 'Invalid domain format' });
+
+  try {
+    res.json(await runBlacklistCheck(host));
+  } catch (err) {
     res.status(500).json({ error: 'Blacklist check timeout or failure' });
   }
 });
@@ -1656,12 +1694,7 @@ function testTlsProtocol(host, port, protocolVersion, minVersion, maxVersion) {
   });
 }
 
-app.post('/api/ssl', heavyApiLimiter, async (req, res) => {
-  const { domain } = req.body || {};
-  if (!domain || typeof domain !== 'string' || domain.length > 256) return res.status(400).json({ error: 'Valid domain is required' });
-  const host = normalizeDomain(domain);
-  if (!host) return res.status(400).json({ error: 'Invalid domain format' });
-
+async function runSslCheck(host) {
   const result = {
     host: host,
     checkedAt: new Date().toISOString(),
@@ -2032,7 +2065,20 @@ app.post('/api/ssl', heavyApiLimiter, async (req, res) => {
   result.grade = calculateSslLabsGrade(score);
   result.grade.score = score;
 
-  res.json(result);
+  return result;
+}
+
+app.post('/api/ssl', heavyApiLimiter, async (req, res) => {
+  const { domain } = req.body || {};
+  if (!domain || typeof domain !== 'string' || domain.length > 256) return res.status(400).json({ error: 'Valid domain is required' });
+  const host = normalizeDomain(domain);
+  if (!host) return res.status(400).json({ error: 'Invalid domain format' });
+
+  try {
+    res.json(await runSslCheck(host));
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'SSL analysis failed' });
+  }
 });
 
 app.post('/api/ssl-labs', heavyApiLimiter, async (req, res) => {
@@ -3421,12 +3467,10 @@ app.post('/api/cert-transparency', heavyApiLimiter, async (req, res) => {
   }
 });
 
-app.post('/api/email-security', heavyApiLimiter, async (req, res) => {
-  const { domain } = req.body || {};
-  if (!domain || typeof domain !== 'string' || domain.length > 256) return res.status(400).json({ error: 'Valid domain is required' });
-  const host = normalizeDomain(domain);
-  if (!host) return res.status(400).json({ error: 'Invalid domain format' });
+const DKIM_SELECTOR_RE = /^[a-z0-9_.-]{1,63}$/i;
+const DEFAULT_DKIM_SELECTORS = ['default', 'google', 'mail', 'dkim', 'k1', 'k2', 's1', 's2', 'email', 'selector1', 'selector2', 'mimecast', 'sendgrid', 'mailchimp', 'amazonses'];
 
+async function runEmailSecurityCheck(host, opts = {}) {
   const resolver = new Resolver();
 
   const result = {
@@ -3544,8 +3588,13 @@ app.post('/api/email-security', heavyApiLimiter, async (req, res) => {
     }
   }
 
-  // DKIM discovery (common selectors)
-  const dkimSelectors = ['default', 'google', 'mail', 'dkim', 'k1', 'k2', 's1', 's2', 'email', 'selector1', 'selector2', 'mimecast', 'sendgrid', 'mailchimp', 'amazonses'];
+  // DKIM discovery: common selectors plus any caller-supplied ones (mail setups
+  // with custom selectors would otherwise be reported as "no DKIM").
+  const extraSelectors = (Array.isArray(opts.selectors) ? opts.selectors : [])
+    .map((s) => String(s).trim().toLowerCase())
+    .filter((s) => DKIM_SELECTOR_RE.test(s))
+    .slice(0, 20);
+  const dkimSelectors = [...new Set([...DEFAULT_DKIM_SELECTORS, ...extraSelectors])];
   const dkimFound = [];
   await Promise.all(dkimSelectors.map(async (sel) => {
     try {
@@ -3585,7 +3634,20 @@ app.post('/api/email-security', heavyApiLimiter, async (req, res) => {
   result.overallScore = max > 0 ? Math.round((pts / max) * 100) : 0;
   result.rating = result.overallScore >= 85 ? 'strong' : result.overallScore >= 65 ? 'good' : result.overallScore >= 40 ? 'fair' : 'weak';
 
-  res.json(result);
+  return result;
+}
+
+app.post('/api/email-security', heavyApiLimiter, async (req, res) => {
+  const { domain, selectors } = req.body || {};
+  if (!domain || typeof domain !== 'string' || domain.length > 256) return res.status(400).json({ error: 'Valid domain is required' });
+  const host = normalizeDomain(domain);
+  if (!host) return res.status(400).json({ error: 'Invalid domain format' });
+
+  try {
+    res.json(await runEmailSecurityCheck(host, { selectors }));
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Email security analysis failed' });
+  }
 });
 
 app.post('/api/propagation', heavyApiLimiter, async (req, res) => {
@@ -3919,28 +3981,69 @@ app.post('/api/dnssec-chain', heavyApiLimiter, async (req, res) => {
     statusMessage: valid ? 'Full DNSSEC chain validated' : signed ? 'DNSSEC configured with issues' : hasDNSKEY ? 'DNSSEC partially configured' : 'DNSSEC not enabled' });
 });
 
+// ── Check registry & orchestrator ──────────────────────────────
+// Directly-callable check functions. The badge, alert scheduler and /api/scan
+// call these instead of HTTP-looping back to our own endpoints, which coupled
+// background jobs to the public HTTP surface (and its rate limits).
+async function runDnsCheck(host, opts = {}) {
+  const { resolver } = createResolver(opts.resolver || 'balanced');
+  const lookup = await runLookupForDomain(resolver, host, recordTypes, {});
+  return {
+    timestamp: new Date().toISOString(),
+    domain: lookup.domain,
+    results: lookup.results,
+    errors: lookup.errors,
+    metrics: lookup.metrics,
+    insights: lookup.insights,
+    totals: lookup.totals,
+  };
+}
+
+const CHECKS = {
+  'dns-lookup': runDnsCheck,
+  'ssl': runSslCheck,
+  'email-security': runEmailSecurityCheck,
+  'blacklist-check': runBlacklistCheck,
+  'whois': runWhoisCheck,
+};
+
+// Run a registry check through the same response cache the HTTP routes use, so
+// scheduler/badge traffic and user scans share results instead of re-checking.
+async function runCheckCached(name, host, opts = {}) {
+  const fn = CHECKS[name];
+  if (!fn) throw new Error(`Unknown check: ${name}`);
+  const key = cacheKeyFor({ method: 'POST', path: `/${name}`, body: { domain: host, ...opts } });
+  const hit = key && responseCache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.body;
+  const payload = await fn(host, opts);
+  if (key && payload && !payload.error) {
+    responseCache.set(key, { body: payload, status: 200, expires: Date.now() + CACHE_TTL_MS });
+    if (responseCache.size > CACHE_MAX_ENTRIES + 50) pruneCache();
+  }
+  return payload;
+}
+
+// Timeout + error tolerance wrapper: aggregate consumers must never hang or die
+// because one check stalled.
+function runCheckSafe(name, host, opts = {}, timeoutMs = 15000) {
+  const timer = new Promise((resolve) => setTimeout(() => resolve({ error: `${name} timed out` }), timeoutMs).unref?.());
+  return Promise.race([
+    runCheckCached(name, host, opts).catch((e) => ({ error: e.message || `${name} failed` })),
+    timer,
+  ]);
+}
+
 // ── Embeddable grade badge ─────────────────────────────────────
-// Server-side health grade (mirrors the client computeHealth weighting) so we can
+// Server-side health grade (same shared formula the client uses) so we can
 // render a live SVG badge people embed in READMEs — each embed is organic reach.
 async function computeDomainGrade(domain) {
   const [dnsR, ssl, email, bl] = await Promise.all([
-    internalLookup('dns-lookup', domain),
-    internalLookup('ssl', domain),
-    internalLookup('email-security', domain),
-    internalLookup('blacklist-check', domain),
+    runCheckSafe('dns-lookup', domain),
+    runCheckSafe('ssl', domain),
+    runCheckSafe('email-security', domain),
+    runCheckSafe('blacklist-check', domain),
   ]);
-  let pts = 0, tot = 0;
-  if (dnsR && !dnsR.error && dnsR.insights?.checks) {
-    const c = dnsR.insights.checks;
-    pts += (c.spf ? 15 : 0) + (c.dmarc ? 15 : 0) + (c.caa ? 10 : 0) + (c.mx ? 10 : 0); tot += 50;
-  }
-  if (email && !email.error && typeof email.overallScore === 'number') { pts += Math.round(email.overallScore * 0.2); tot += 20; }
-  if (ssl && !ssl.error) { const d = ssl.certificate?.daysRemaining; pts += d > 90 ? 30 : d > 30 ? 20 : d > 0 ? 10 : 0; tot += 30; }
-  if (bl && !bl.error && bl.results) { pts += bl.results.some((r) => r.listed) ? 0 : 10; tot += 10; }
-  if (!tot) return null;
-  const pct = Math.round((pts / tot) * 100);
-  const grade = pct >= 95 ? 'A+' : pct >= 85 ? 'A' : pct >= 70 ? 'B' : pct >= 50 ? 'C' : 'D';
-  return { pct, grade };
+  return computeHealthScore({ dns: dnsR, ssl, emailsec: email, blacklist: bl });
 }
 function badgeColor(pct) { return pct >= 85 ? '#22c55e' : pct >= 70 ? '#a3e635' : pct >= 50 ? '#f59e0b' : '#ef4444'; }
 function svgBadge(label, message, color) {
@@ -3976,11 +4079,51 @@ app.get('/api/badge/:domain', async (req, res) => {
   }
 });
 
+// ── Aggregate scan (for API users / CI pipelines) ──────────────
+// One call → every registry check + the overall health summary. The web UI
+// keeps its own per-endpoint fan-out for progressive rendering; this endpoint
+// exists so a script or pipeline gets everything in a single round-trip.
+app.post('/api/scan', heavyApiLimiter, async (req, res) => {
+  const { domain, checks, selectors } = req.body || {};
+  if (!domain || typeof domain !== 'string' || domain.length > 256) return res.status(400).json({ error: 'Valid domain is required' });
+  const host = normalizeDomain(domain);
+  if (!host) return res.status(400).json({ error: 'Invalid domain format' });
+
+  const available = Object.keys(CHECKS);
+  const requested = Array.isArray(checks) && checks.length
+    ? checks.map(String).filter((c) => available.includes(c))
+    : available;
+  if (!requested.length) {
+    return res.status(400).json({ error: `No valid checks requested. Available: ${available.join(', ')}` });
+  }
+
+  const startedAt = Date.now();
+  const payloads = await runWithConcurrency(requested, 4, (name) =>
+    runCheckSafe(name, host, name === 'email-security' ? { selectors } : {}));
+
+  const results = {};
+  requested.forEach((name, i) => { results[name] = payloads[i]; });
+
+  res.json({
+    domain: host,
+    checkedAt: new Date().toISOString(),
+    durationMs: Date.now() - startedAt,
+    checks: requested,
+    results,
+    summary: computeHealthScore({
+      dns: results['dns-lookup'],
+      ssl: results['ssl'],
+      emailsec: results['email-security'],
+      blacklist: results['blacklist-check'],
+    }),
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     service: 'HetOps DNS Intelligence',
-    version: '6.0.0',
+    version: VERSION,
     cache: { entries: responseCache.size, ttlMs: CACHE_TTL_MS },
     features: [
       'batchLookup', 'resolverProfiles', 'securityInsights', 'timingMetrics',
@@ -4091,6 +4234,11 @@ app.get('/api/alerts', requireAuth, (req, res) => {
 app.post('/api/alerts', requireAuth, (req, res) => {
   const host = normalizeDomain(req.body?.domain || '');
   if (!host) return res.status(400).json({ error: 'Valid domain required' });
+  // Each watched domain costs 4 network checks every scheduler tick.
+  const existing = store.listAlerts(req.user.id);
+  if (existing.length >= 50 && !existing.some((a) => a.domain === host)) {
+    return res.status(400).json({ error: 'Watchlist limit reached (50 domains)' });
+  }
   const emailEnabled = req.body?.emailEnabled !== false;
   store.addAlert(req.user.id, host, emailEnabled ? 1 : 0);
   res.json({ ok: true, alerts: store.listAlerts(req.user.id) });
@@ -4138,21 +4286,18 @@ app.delete('/api/keys/:key', requireAuth, (req, res) => {
 });
 
 // ── Alert scheduler ────────────────────────────────────────────
-// Periodically re-checks every watched domain by calling our own endpoints
-// (reusing all logic + the response cache), diffs against the last stored state,
-// and emails the owner when something meaningful changes.
-async function internalLookup(endpoint, domain) {
-  try {
-    const r = await fetch(`http://127.0.0.1:${PORT}/api/${endpoint}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ domain, resolver: 'balanced' }),
-    });
-    return await r.json();
-  } catch { return { error: true }; }
-}
-// Parse the registry expiry date out of raw WHOIS text → days remaining (or null).
+// Periodically re-checks every watched domain via the check registry (sharing
+// the response cache), diffs against the last stored state, and emails the
+// owner when something meaningful changes.
+// Days until the registration expires: prefer RDAP's structured date, fall back
+// to parsing raw WHOIS text (brittle across registrars, but better than nothing).
 function parseWhoisExpiryDays(whois) {
-  if (!whois || whois.error || !whois.rawData) return null;
+  if (!whois || whois.error) return null;
+  if (whois.expiresAt) {
+    const t = Date.parse(whois.expiresAt);
+    if (!isNaN(t)) return Math.floor((t - Date.now()) / 86400000);
+  }
+  if (!whois.rawData) return null;
   const m = whois.rawData.match(/(?:registry expiry date|registrar registration expiration date|expir(?:y|ation) date|paid-till|renewal date)\s*:\s*([0-9TZ:.\-\/ ]+)/i);
   if (!m) return null;
   const t = Date.parse(m[1].trim());
@@ -4161,10 +4306,10 @@ function parseWhoisExpiryDays(whois) {
 }
 async function checkDomainStatus(domain) {
   const [ssl, bl, dnsRes, whois] = await Promise.all([
-    internalLookup('ssl', domain),
-    internalLookup('blacklist-check', domain),
-    internalLookup('dns-lookup', domain),
-    internalLookup('whois', domain),
+    runCheckSafe('ssl', domain),
+    runCheckSafe('blacklist-check', domain),
+    runCheckSafe('dns-lookup', domain),
+    runCheckSafe('whois', domain),
   ]);
   // null (not []) when the lookup failed, so a transient failure is distinguishable
   // from a genuine "no records" result and never triggers a false "changed" alert.
@@ -4201,9 +4346,12 @@ async function sendWebhook(url, domain, changes) {
     const u = new URL(url);
     if (!/^https?:$/.test(u.protocol) || await hostIsBlocked(u.hostname)) return;
     const text = `*HetOps DNS* — changes for ${domain}:\n` + changes.map((c) => '• ' + c).join('\n');
+    // redirect:'manual' — a webhook that 302s could otherwise steer this request
+    // to an internal address after the hostname check passed.
     await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, content: text, domain, changes }), // text=Slack, content=Discord
+      redirect: 'manual', signal: AbortSignal.timeout(5000),
     });
   } catch (e) { console.error('webhook failed:', e.message); }
 }
@@ -4213,10 +4361,14 @@ async function runAlertChecks() {
   alertRunning = true;
   try {
     const alerts = store.allAlerts();
-    const byDomain = new Map();
+    // Check every unique domain with a small concurrency pool first (a single
+    // slow WHOIS used to stall the whole serial run), then apply diffs.
+    const domains = [...new Set(alerts.map((a) => a.domain))];
+    const statuses = await runWithConcurrency(domains, 3, (d) => checkDomainStatus(d));
+    const byDomain = new Map(domains.map((d, i) => [d, statuses[i]]));
     for (const a of alerts) {
-      if (!byDomain.has(a.domain)) byDomain.set(a.domain, await checkDomainStatus(a.domain));
       const cur = byDomain.get(a.domain);
+      if (!cur) continue;
       const changes = diffStatus(a.last, cur);
       // Preserve last-known-good values for any field that failed this round, so a
       // transient resolver failure can't wipe the baseline or flap future alerts.
@@ -4282,6 +4434,11 @@ app.get('/docs', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'docs.html'));
 });
 
+// Unknown /api routes must return JSON, not the SPA shell.
+app.all('/api/*', (req, res) => {
+  res.status(404).json({ error: 'Unknown API endpoint' });
+});
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -4295,6 +4452,25 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught exception:', err);
 });
 
-app.listen(PORT, () => {
-  console.log(`DNS Lookup tool running on port ${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`DNS Lookup tool running on port ${PORT}`);
+  });
+}
+
+// Exported for tests (node --test); the server only listens when run directly.
+module.exports = {
+  app,
+  normalizeDomain,
+  parseDomains,
+  isBlockedIPv4,
+  isBlockedIp,
+  cacheKeyFor,
+  parseWhoisExpiryDays,
+  diffStatus,
+  calculateSslLabsGrade,
+  computeDomainGrade,
+  runCheckCached,
+  runCheckSafe,
+  CHECKS,
+};
