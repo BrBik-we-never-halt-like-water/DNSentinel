@@ -246,8 +246,8 @@ const DEFAULT_PORTS = [21, 22, 25, 80, 110, 143, 443, 465, 993, 995, 3306, 5432,
 const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:3000', 
   'http://127.0.0.1:3000', 
-  'https://dns.hetops.dev', 
-  'http://dns.hetops.dev'
+  'https://dns.brbik.com', 
+  'http://dns.brbik.com'
 ];
 const configuredOrigins = (process.env.CORS_ORIGINS || '')
   .split(',')
@@ -2571,7 +2571,7 @@ app.post('/api/redirect', heavyApiLimiter, async (req, res) => {
           redirect: 'manual',
           timeout: 8000,
           headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; HetOps-DNS/3.0)',
+            'User-Agent': 'Mozilla/5.0 (compatible; DNSentinel/3.0)',
             'Accept': 'text/html,application/xhtml+xml'
           }
         });
@@ -3720,7 +3720,7 @@ app.post('/api/subdomain-takeover', heavyApiLimiter, async (req, res) => {
         try {
           const r = await fetch(`https://${fqdn}`, {
             signal: AbortSignal.timeout(5000), redirect: 'follow',
-            headers: { 'User-Agent': 'HetOps-DNS-Scanner/5.0' }
+            headers: { 'User-Agent': 'DNSentinel-Scanner/5.0' }
           });
           const body = (await r.text()).toLowerCase();
           entry.statusCode = r.status;
@@ -3748,7 +3748,7 @@ app.post('/api/hsts-preload', heavyApiLimiter, async (req, res) => {
 
   try {
     const pr = await fetch(`https://hstspreload.org/api/v2/status?domain=${encodeURIComponent(host)}`, {
-      signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'HetOps-DNS-Scanner/5.0' }
+      signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'DNSentinel-Scanner/5.0' }
     });
     if (pr.ok) { const d = await pr.json(); preloadStatus = d.status || 'unknown'; }
   } catch (e) {}
@@ -3756,7 +3756,7 @@ app.post('/api/hsts-preload', heavyApiLimiter, async (req, res) => {
   try {
     const sr = await fetch(`https://${host}`, {
       signal: AbortSignal.timeout(6000), redirect: 'manual',
-      headers: { 'User-Agent': 'HetOps-DNS-Scanner/5.0' }
+      headers: { 'User-Agent': 'DNSentinel-Scanner/5.0' }
     });
     hstsHeader = sr.headers.get('strict-transport-security');
     if (hstsHeader) {
@@ -3787,7 +3787,7 @@ app.post('/api/csp-analyzer', heavyApiLimiter, async (req, res) => {
   try {
     const r = await fetch(`https://${host}`, {
       signal: AbortSignal.timeout(8000), redirect: 'follow',
-      headers: { 'User-Agent': 'Mozilla/5.0 HetOps-DNS-Scanner/5.0' }
+      headers: { 'User-Agent': 'Mozilla/5.0 DNSentinel-Scanner/5.0' }
     });
     const cspFull = r.headers.get('content-security-policy');
     const cspRO   = r.headers.get('content-security-policy-report-only');
@@ -4069,13 +4069,13 @@ app.get('/api/badge/:domain', async (req, res) => {
   const host = normalizeDomain((req.params.domain || '').replace(/\.svg$/i, ''));
   res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=3600');
-  if (!host) return res.send(svgBadge('HetOps DNS', 'invalid', '#9ca3af'));
+  if (!host) return res.send(svgBadge('DNSentinel', 'invalid', '#9ca3af'));
   try {
     const g = await computeDomainGrade(host);
-    if (!g) return res.send(svgBadge('HetOps DNS', 'unknown', '#9ca3af'));
-    res.send(svgBadge('HetOps DNS', g.grade, badgeColor(g.pct)));
+    if (!g) return res.send(svgBadge('DNSentinel', 'unknown', '#9ca3af'));
+    res.send(svgBadge('DNSentinel', g.grade, badgeColor(g.pct)));
   } catch (e) {
-    res.send(svgBadge('HetOps DNS', 'error', '#9ca3af'));
+    res.send(svgBadge('DNSentinel', 'error', '#9ca3af'));
   }
 });
 
@@ -4122,7 +4122,7 @@ app.post('/api/scan', heavyApiLimiter, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    service: 'HetOps DNS Intelligence',
+    service: 'DNSentinel Intelligence',
     version: VERSION,
     cache: { entries: responseCache.size, ttlMs: CACHE_TTL_MS },
     features: [
@@ -4345,7 +4345,7 @@ async function sendWebhook(url, domain, changes) {
   try {
     const u = new URL(url);
     if (!/^https?:$/.test(u.protocol) || await hostIsBlocked(u.hostname)) return;
-    const text = `*HetOps DNS* — changes for ${domain}:\n` + changes.map((c) => '• ' + c).join('\n');
+    const text = `*DNSentinel* — changes for ${domain}:\n` + changes.map((c) => '• ' + c).join('\n');
     // redirect:'manual' — a webhook that 302s could otherwise steer this request
     // to an internal address after the hostname check passed.
     await fetch(url, {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HetOps DNS — Domain Intelligence</title>
+  <title>DNSentinel — Domain Intelligence</title>
   <meta name="description" content="Comprehensive domain intelligence: DNS records, WHOIS, SSL analysis, global propagation, security auditing.">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="mask-icon" href="/icon.svg" color="#10b981">
@@ -11,9 +11,9 @@
   <meta name="theme-color" content="#050514">
   <link rel="manifest" href="/manifest.webmanifest">
   <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"WebApplication","name":"HetOps DNS Intelligence","url":"https://dns.hetops.dev/","applicationCategory":"SecurityApplication","operatingSystem":"Any","browserRequirements":"Requires JavaScript","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"description":"Comprehensive domain intelligence: DNS records, WHOIS, SSL/TLS analysis, security headers, DNSSEC, global propagation, GeoIP, port scanning, email authentication and more — in one report."}
+  {"@context":"https://schema.org","@type":"WebApplication","name":"DNSentinel Intelligence","url":"https://dns.brbik.com/","applicationCategory":"SecurityApplication","operatingSystem":"Any","browserRequirements":"Requires JavaScript","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"description":"Comprehensive domain intelligence: DNS records, WHOIS, SSL/TLS analysis, security headers, DNSSEC, global propagation, GeoIP, port scanning, email authentication and more — in one report."}
   </script>
-  <meta property="og:title" content="HetOps DNS — Domain Intelligence">
+  <meta property="og:title" content="DNSentinel — Domain Intelligence">
   <meta property="og:description" content="DNS records, WHOIS, SSL/TLS, security auditing, propagation, GeoIP and more — in one report.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="/logo.png">
@@ -1242,17 +1242,10 @@
 <nav class="navbar" aria-label="Primary navigation">
   <div class="container">
     <div class="navbar-inner">
-      <a href="/" class="logo" aria-label="HetOps DNS home">
-        <span class="logo-wordmark"><span class="het">HET</span><span class="ops">OPS_</span></span>
-        <span class="logo-tool">DNS</span>
+      <a href="/" class="logo" aria-label="DNSentinel home">
+        <span class="logo-wordmark"><span class="het">DNS</span><span class="ops">entinel</span></span>
       </a>
       <div class="nav-right">
-        <nav class="nav-links" aria-label="HetOps ecosystem">
-          <a href="https://hetops.dev"        class="nav-link" target="_blank" rel="noopener">Portfolio</a>
-          <a href="https://tools.hetops.dev"  class="nav-link" target="_blank" rel="noopener">Tools</a>
-          <a href="https://status.hetops.dev" class="nav-link" target="_blank" rel="noopener">Status</a>
-        </nav>
-        <span class="nav-sep"></span>
         <span class="nav-acct" id="navAcct">
           <button class="nav-signin" id="navSignin" onclick="openLogin()">Sign in</button>
         </span>
@@ -1268,17 +1261,14 @@
 <div class="mobile-nav-overlay" id="mobileNavOverlay" role="dialog" aria-modal="true" aria-label="Navigation">
   <div class="mobile-nav-header">
     <div class="logo-wordmark" style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:900;font-style:italic;font-size:22px;letter-spacing:-0.5px">
-      <span style="color:var(--text)">HET</span><span style="color:var(--brand);text-shadow:0 0 20px var(--brand-glow)">OPS_</span>
+      <span style="color:var(--text)">DNS</span><span style="color:var(--brand);text-shadow:0 0 20px var(--brand-glow)">entinel</span>
     </div>
     <button class="mobile-nav-close" aria-label="Close navigation" onclick="closeMobileNav()">
       <i data-lucide="x"></i>
     </button>
   </div>
   <nav class="mobile-nav-links">
-    <a href="https://hetops.dev"        class="mobile-nav-link" target="_blank" rel="noopener"><i data-lucide="user"></i>Portfolio</a>
-    <a href="https://tools.hetops.dev"  class="mobile-nav-link" target="_blank" rel="noopener"><i data-lucide="wrench"></i>Tools</a>
-    <a href="https://status.hetops.dev" class="mobile-nav-link" target="_blank" rel="noopener"><i data-lucide="activity"></i>Status</a>
-    <a href="/"                         class="mobile-nav-link active"><i data-lucide="search"></i>DNS</a>
+    <a href="/"                         class="mobile-nav-link active"><i data-lucide="search"></i>Scan</a>
   </nav>
   <div class="mobile-acct" id="mobileAcct"></div>
 </div>
@@ -1678,21 +1668,11 @@
 
 <!-- ── Footer ────────────────────────────────────────────── -->
 <footer class="footer">
-  <div class="footer-wm"><span class="het">HET</span><span class="ops">OPS_</span></div>
+  <div class="footer-wm"><span class="het">DNS</span><span class="ops">entinel</span></div>
   <div class="footer-links">
     <a href="/docs"                     class="footer-link">API Docs</a>
-    <span class="footer-dot">·</span>
-    <a href="https://hetops.dev"        class="footer-link" target="_blank" rel="noopener">Portfolio</a>
-    <span class="footer-dot">·</span>
-    <a href="https://tools.hetops.dev"  class="footer-link" target="_blank" rel="noopener">Tools</a>
-    <span class="footer-dot">·</span>
-    <a href="https://status.hetops.dev" class="footer-link" target="_blank" rel="noopener">Status</a>
-    <span class="footer-dot">·</span>
-    <a href="https://hub.hetops.dev"    class="footer-link" target="_blank" rel="noopener">Hub</a>
-    <span class="footer-dot">·</span>
-    <a href="https://n8n.hetops.dev"    class="footer-link" target="_blank" rel="noopener">n8n</a>
   </div>
-  <p class="footer-sub">DNS Intelligence — Part of the HetOps ecosystem</p>
+  <p class="footer-sub">Domain Intelligence — a BrBik product</p>
 </footer>
 
 <script>
@@ -3189,7 +3169,7 @@ function copyBadge(){
   const origin=window.location.origin;
   const badge=`${origin}/api/badge/${encodeURIComponent(domain)}.svg`;
   const link=`${origin}/?domain=${encodeURIComponent(domain)}`;
-  const md=`[![HetOps DNS](${badge})](${link})`;
+  const md=`[![DNSentinel](${badge})](${link})`;
   navigator.clipboard.writeText(md)
     .then(()=>toast('Live Markdown badge copied to clipboard','ok'))
     .catch(()=>toast('Could not copy badge','err'));
@@ -3657,7 +3637,7 @@ function exportBulkCsv(){
   const head='domain,grade,score,tls_grade,cert_days,blacklisted';
   const lines=bulkResults.map(r=>[r.domain,r.grade,r.pct??'',r.tls??'',r.sslDays??'',r.blacklisted==null?'':r.blacklisted].join(','));
   const blob=new Blob([[head,...lines].join('\n')],{type:'text/csv'}); const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download='hetops-bulk-scan.csv'; a.click(); URL.revokeObjectURL(url);
+  const a=document.createElement('a'); a.href=url; a.download='dnsentinel-bulk-scan.csv'; a.click(); URL.revokeObjectURL(url);
   toast('CSV exported','ok');
 }
 
@@ -4408,7 +4388,7 @@ function exportResults(){
   const blob=new Blob([json],{type:'application/json'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  a.href=url; a.download=`hetops-dns-${domain}-${Date.now()}.json`; a.click();
+  a.href=url; a.download=`dnsentinel-${domain}-${Date.now()}.json`; a.click();
   URL.revokeObjectURL(url);
   toast('Report exported as JSON','ok');
 }
@@ -4446,7 +4426,7 @@ function exportPDF(){
   }
   const h=computeHealth();
   const now=new Date();
-  hdr.innerHTML=`<div class="pdf-wm"><span class="het">HET</span><span class="ops">OPS_</span> DNS Report</div>
+  hdr.innerHTML=`<div class="pdf-wm"><span class="het">DNS</span><span class="ops">entinel</span> Report</div>
     <div class="pdf-meta">${esc(domain)}${h?` · Grade ${esc(h.grade)} (${h.pct}/100)`:''}<br>Generated ${now.toLocaleString()}</div>`;
   toast('Opening print dialog — choose "Save as PDF"','info',2600);
   const cleanup=()=>{ if(hdr) hdr.remove(); window.removeEventListener('afterprint',cleanup); };

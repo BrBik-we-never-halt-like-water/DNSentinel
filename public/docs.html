@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HetOps DNS — API Documentation</title>
-  <meta name="description" content="HetOps DNS public API: programmatic domain intelligence — DNS, WHOIS, SSL/TLS, security, propagation, GeoIP and more.">
+  <title>DNSentinel — API Documentation</title>
+  <meta name="description" content="DNSentinel public API: programmatic domain intelligence — DNS, WHOIS, SSL/TLS, security, propagation, GeoIP and more.">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <meta name="theme-color" content="#050514">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@1,900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -45,12 +45,12 @@
 </head>
 <body>
   <nav class="nav"><div class="nav-in">
-    <a href="/" class="wm"><span class="het">HET</span><span class="ops">OPS_</span></a>
+    <a href="/" class="wm"><span class="het">DNS</span><span class="ops">entinel</span></a>
     <a href="/" style="font-size:13px;color:var(--dim)">← Back to app</a>
   </div></nav>
 
   <div class="wrap">
-    <h1>HetOps DNS <span class="g">API</span></h1>
+    <h1>DNSentinel <span class="g">API</span></h1>
     <p class="lead">Programmatic domain intelligence over a simple JSON API — DNS, WHOIS, SSL/TLS, security headers, DNSSEC, global propagation, GeoIP, ports, email authentication and more. Free, no key required for normal use.</p>
 
     <div class="toc">
@@ -59,14 +59,14 @@
     </div>
 
     <h2 id="basics">Basics</h2>
-    <p>All analysis endpoints accept <code>POST</code> with a JSON body <code>{ "domain": "example.com" }</code> and return JSON. Base URL: <code>https://dns.hetops.dev</code>.</p>
-    <pre><span class="k">curl</span> -X POST https://dns.hetops.dev/api/dns-lookup \
+    <p>All analysis endpoints accept <code>POST</code> with a JSON body <code>{ "domain": "example.com" }</code> and return JSON. Base URL: <code>https://dns.brbik.com</code>.</p>
+    <pre><span class="k">curl</span> -X POST https://dns.brbik.com/api/dns-lookup \
   -H <span class="s">"Content-Type: application/json"</span> \
   -d <span class="s">'{"domain":"github.com"}'</span></pre>
 
     <h2 id="scan">Aggregate scan</h2>
     <p>One call that runs the core checks and returns the overall health summary — built for scripts and CI pipelines. Optional <code>checks</code> array narrows the run.</p>
-    <pre><span class="k">curl</span> -X POST https://dns.hetops.dev/api/scan \
+    <pre><span class="k">curl</span> -X POST https://dns.brbik.com/api/scan \
   -H <span class="s">"Content-Type: application/json"</span> \
   -d <span class="s">'{"domain":"github.com"}'</span>
 
@@ -154,13 +154,13 @@
     <p>Embed a live security-grade badge in your README — it recomputes on each load:</p>
     <pre><span class="method get">GET</span> <span class="ep">/api/badge/&lt;domain&gt;.svg</span>
 
-[![HetOps DNS](https://dns.hetops.dev/api/badge/github.com.svg)](https://dns.hetops.dev/?domain=github.com)</pre>
+[![DNSentinel](https://dns.brbik.com/api/badge/github.com.svg)](https://dns.brbik.com/?domain=github.com)</pre>
     <div class="card"><img src="/api/badge/github.com.svg" alt="badge example" height="20"> &nbsp;<span style="color:var(--faint);font-size:12px">live example</span></div>
 
     <h2 id="errors">Errors</h2>
     <p>Errors return a JSON body <code>{ "error": "message" }</code> with an appropriate status: <code>400</code> invalid domain, <code>403</code> blocked/internal host, <code>429</code> rate limited, <code>500</code> lookup failed.</p>
   </div>
 
-  <footer>HetOps DNS Intelligence · <a href="/">app</a> · <a href="https://hetops.dev">hetops.dev</a></footer>
+  <footer>DNSentinel Intelligence · <a href="/">app</a></footer>
 </body>
 </html>

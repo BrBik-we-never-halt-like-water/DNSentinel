@@ -1,6 +1,6 @@
 {
-  "name": "HetOps DNS Intelligence",
-  "short_name": "HetOps DNS",
+  "name": "DNSentinel Intelligence",
+  "short_name": "DNSentinel",
   "description": "DNS records, WHOIS, SSL/TLS, security auditing, propagation, GeoIP and more — in one report.",
   "start_url": "/",
   "scope": "/",

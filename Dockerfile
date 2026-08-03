@@ -12,8 +12,8 @@ RUN npm install --production
 COPY . .
 
 # Persistent data (SQLite DB: users, history, alerts). Mount a volume here so it
-# survives container restarts:  docker run -v hetops_data:/app/data ...
-ENV DB_PATH=/app/data/hetops.db
+# survives container restarts:  docker run -v dnsentinel_data:/app/data ...
+ENV DB_PATH=/app/data/dnsentinel.db
 RUN mkdir -p /app/data
 VOLUME ["/app/data"]
 

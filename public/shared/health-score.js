@@ -1,5 +1,5 @@
 /**
- * HetOps DNS — single source of truth for the domain health score.
+ * DNSentinel — single source of truth for the domain health score.
  *
  * Loaded by BOTH the server (require) and the browser (script tag → window.HetOpsScore),
  * so the grade on the badge, the /api/scan summary and the UI ring can never drift.

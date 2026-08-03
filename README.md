@@ -1,4 +1,4 @@
-# HetOps DNS Intelligence — dns.hetops.dev
+# DNSentinel Intelligence — dns.brbik.com
 
 A comprehensive domain intelligence platform that replaces multiple tools including SSL Labs, SSL Checker, Wappalyzer, MXToolbox, and more. Built for security professionals, developers, and DevOps engineers.
 
@@ -177,7 +177,7 @@ curl -X POST http://localhost:3000/api/dns-lookup \
 3. Connect the repository
 4. Coolify will auto-detect the `Dockerfile`
 5. Set **Port** to `3000`
-6. Set your domain (e.g. `dns.hetops.dev`)
+6. Set your domain (e.g. `dns.brbik.com`)
 7. Enable **HTTPS** in Coolify settings
 8. Click **Deploy**
 
@@ -188,8 +188,8 @@ curl -X POST http://localhost:3000/api/dns-lookup \
 
 ### Via Docker
 ```bash
-docker build -t hetops-dns .
-docker run -p 3000:3000 hetops-dns
+docker build -t dnsentinel .
+docker run -p 3000:3000 dnsentinel
 ```
 
 ## Rate Limiting

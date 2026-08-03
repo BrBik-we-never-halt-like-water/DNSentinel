@@ -1,7 +1,7 @@
 {
-  "name": "hetops-dns",
+  "name": "dnsentinel",
   "version": "6.0.0",
-  "description": "HetOps DNS Intelligence — SSL Labs replacement with full TLS analysis, vulnerability detection, certificate chain validation, and comprehensive security auditing",
+  "description": "DNSentinel Intelligence — SSL Labs replacement with full TLS analysis, vulnerability detection, certificate chain validation, and comprehensive security auditing",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

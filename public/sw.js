@@ -1,6 +1,6 @@
-// HetOps DNS service worker — network-first so content is always fresh online,
+// DNSentinel service worker — network-first so content is always fresh online,
 // with a cached app shell for offline. API calls always go to the network.
-const CACHE = 'hetops-dns-v2';
+const CACHE = 'dnsentinel-v2';
 const SHELL = ['/', '/icon.svg', '/manifest.webmanifest', '/shared/health-score.js'];
 
 self.addEventListener('install', (e) => {

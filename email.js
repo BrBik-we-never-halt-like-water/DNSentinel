@@ -6,7 +6,7 @@
 const nodemailer = require('nodemailer');
 
 const HOST = process.env.SMTP_HOST;
-const FROM = process.env.MAIL_FROM || process.env.SMTP_USER || 'HetOps DNS <no-reply@hetops.dev>';
+const FROM = process.env.MAIL_FROM || process.env.SMTP_USER || 'DNSentinel <no-reply@dns.brbik.com>';
 const enabled = !!HOST;
 
 let transporter = null;
@@ -29,7 +29,7 @@ const brandShell = (title, bodyHtml) => `
       <h1 style="font-size:18px;margin:0 0 14px">${title}</h1>
       ${bodyHtml}
       <div style="margin-top:24px;padding-top:16px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:rgba(241,245,249,.4)">
-        Sent by HetOps DNS · If you didn't request this you can safely ignore it.
+        Sent by DNSentinel · If you didn't request this you can safely ignore it.
       </div>
     </div>
   </div>`;
@@ -43,11 +43,11 @@ async function send({ to, subject, html, text }) {
 }
 
 function sendMagicLink(to, url) {
-  const html = brandShell('Sign in to HetOps DNS', `
+  const html = brandShell('Sign in to DNSentinel', `
     <p style="font-size:14px;color:rgba(241,245,249,.7);line-height:1.6">Click the button below to sign in. This link expires in 15 minutes and can be used once.</p>
     <a href="${url}" style="display:inline-block;margin:18px 0;background:linear-gradient(135deg,#10b981,#059669);color:#031b12;text-decoration:none;font-weight:700;padding:12px 24px;border-radius:10px">Sign in &rarr;</a>
     <p style="font-size:12px;color:rgba(241,245,249,.45);line-height:1.5">Button not working? <a href="${url}" style="color:#10b981;text-decoration:underline">Use this sign-in link</a> instead.</p>`);
-  return send({ to, subject: 'Your HetOps DNS sign-in link', html, text: `Sign in to HetOps DNS: ${url}` });
+  return send({ to, subject: 'Your DNSentinel sign-in link', html, text: `Sign in to DNSentinel: ${url}` });
 }
 
 function sendAlertEmail(to, domain, changes) {
@@ -55,13 +55,13 @@ function sendAlertEmail(to, domain, changes) {
   const html = brandShell(`Changes detected for ${escapeHtml(domain)}`, `
     <p style="font-size:14px;color:rgba(241,245,249,.7);line-height:1.6">We detected the following change(s) on a domain you're monitoring:</p>
     <ul style="padding-left:18px;font-size:14px">${items}</ul>
-    <a href="${process.env.APP_URL || 'https://dns.hetops.dev'}/?domain=${encodeURIComponent(domain)}" style="display:inline-block;margin-top:14px;background:rgba(16,185,129,.14);border:1px solid rgba(16,185,129,.32);color:#10b981;text-decoration:none;font-weight:600;padding:10px 18px;border-radius:10px">View full report →</a>`);
-  return send({ to, subject: `[HetOps DNS] ${domain}: ${changes[0]}`, html, text: `${domain}\n` + changes.map(c => '- ' + c).join('\n') });
+    <a href="${process.env.APP_URL || 'https://dns.brbik.com'}/?domain=${encodeURIComponent(domain)}" style="display:inline-block;margin-top:14px;background:rgba(16,185,129,.14);border:1px solid rgba(16,185,129,.32);color:#10b981;text-decoration:none;font-weight:600;padding:10px 18px;border-radius:10px">View full report →</a>`);
+  return send({ to, subject: `[DNSentinel] ${domain}: ${changes[0]}`, html, text: `${domain}\n` + changes.map(c => '- ' + c).join('\n') });
 }
 
 // Weekly digest: one row per monitored domain with its current status.
 function sendDigest(to, rows) {
-  const base = process.env.APP_URL || 'https://dns.hetops.dev';
+  const base = process.env.APP_URL || 'https://dns.brbik.com';
   const body = rows.map(r => `
     <tr>
       <td style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.07);font-family:monospace;font-size:13px">
@@ -72,9 +72,9 @@ function sendDigest(to, rows) {
   const html = brandShell('Your weekly domain report', `
     <p style="font-size:14px;color:rgba(241,245,249,.7);line-height:1.6">Status of the ${rows.length} domain${rows.length !== 1 ? 's' : ''} you're monitoring:</p>
     <table style="width:100%;border-collapse:collapse;margin-top:8px">${body}</table>
-    <a href="${base}" style="display:inline-block;margin-top:18px;background:rgba(16,185,129,.14);border:1px solid rgba(16,185,129,.32);color:#10b981;text-decoration:none;font-weight:600;padding:10px 18px;border-radius:10px">Open HetOps DNS →</a>`);
+    <a href="${base}" style="display:inline-block;margin-top:18px;background:rgba(16,185,129,.14);border:1px solid rgba(16,185,129,.32);color:#10b981;text-decoration:none;font-weight:600;padding:10px 18px;border-radius:10px">Open DNSentinel →</a>`);
   const text = rows.map(r => `${r.domain}: ${r.summary}`).join('\n');
-  return send({ to, subject: `[HetOps DNS] Weekly report — ${rows.length} domain${rows.length !== 1 ? 's' : ''}`, html, text });
+  return send({ to, subject: `[DNSentinel] Weekly report — ${rows.length} domain${rows.length !== 1 ? 's' : ''}`, html, text });
 }
 
 function escapeHtml(s) {
