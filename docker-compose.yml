@@ -14,7 +14,9 @@ services:
       PORT: 3000
       DB_PATH: /app/data/dnsentinel.db
     ports:
-      - "3000:3000"          # point your reverse proxy (dns.brbik.com) at host :3000
+      # Host port is set by DNS_HOST_PORT in .env (default 3000) so this app can share a
+      # VM with others. Point your reverse proxy at that host port. Container stays on 3000.
+      - "${DNS_HOST_PORT:-3000}:3000"
     volumes:
       - dnsentinel_data:/app/data # persistent SQLite storage — do NOT remove
 
