@@ -1,13 +1,22 @@
-FROM node:20-alpine
+# Debian-glibc base (not alpine/musl). Two reasons this is more robust than node:20-alpine:
+#   1. better-sqlite3 ships glibc prebuilt binaries, so the normal install path needs no
+#      compiler at all (fast, no source build).
+#   2. If a prebuilt is ever missing and it must compile, node-gyp fetches headers from the
+#      OFFICIAL nodejs.org/dist — not the flaky unofficial-builds.nodejs.org host that a
+#      musl/alpine build depends on (that fetch is what broke the original Dockerfile).
+FROM node:20-slim
 
 WORKDIR /app
 
-# better-sqlite3 is a native module — install build toolchain so it compiles on
-# musl/alpine when no prebuilt binary is available.
-RUN apk add --no-cache python3 make g++
+# Toolchain is a *fallback* for the rare case a prebuilt binary isn't available; the glibc
+# prebuilt path normally skips it entirely.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-RUN npm install --production
+# npm ci = reproducible install straight from the lockfile; --omit=dev skips devDeps.
+RUN npm ci --omit=dev
 
 COPY . .
 
