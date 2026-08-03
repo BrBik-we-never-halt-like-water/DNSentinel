@@ -1,30 +1,21 @@
-// ── Email delivery (nodemailer over SMTP) ──────────────────────
+// ── Email delivery (Resend HTTP API) ───────────────────────────
+// Matches the brbik-website pattern: send via https://api.resend.com/emails.
 // Configure via environment variables:
-//   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_SECURE (true/false), MAIL_FROM
-// If SMTP_HOST is not set the module runs in "console mode": emails are logged to
-// stdout instead of sent, so local development and CI work without a mail server.
-const nodemailer = require('nodemailer');
+//   RESEND_API_KEY  — your Resend API key (re_...)
+//   RESEND_FROM     — verified sender, e.g. "DNSentinel <no-reply@dns.brbik.com>"
+// If RESEND_API_KEY is not set the module runs in "console mode": emails are logged
+// to stdout instead of sent, so local development and CI work without a mail provider.
 
-const HOST = process.env.SMTP_HOST;
-const FROM = process.env.MAIL_FROM || process.env.SMTP_USER || 'DNSentinel <no-reply@dns.brbik.com>';
-const enabled = !!HOST;
-
-let transporter = null;
-if (enabled) {
-  transporter = nodemailer.createTransport({
-    host: HOST,
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-    auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-  });
-}
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const FROM = process.env.RESEND_FROM || 'DNSentinel <no-reply@dns.brbik.com>';
+const enabled = !!RESEND_API_KEY;
 
 const brandShell = (title, bodyHtml) => `
   <div style="background:#050514;padding:32px;font-family:'Segoe UI',Arial,sans-serif;color:#f1f5f9">
     <div style="max-width:520px;margin:0 auto;background:#0c0c1e;border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:28px">
       <div style="font-weight:900;font-style:italic;font-size:22px;letter-spacing:-.5px;margin-bottom:18px">
-        <span style="color:#f1f5f9">HET</span><span style="color:#10b981">OPS_</span>
-        <span style="font-style:normal;font-weight:600;font-size:13px;color:rgba(241,245,249,.5);margin-left:6px">DNS Intelligence</span>
+        <span style="color:#f1f5f9">DNS</span><span style="color:#10b981">entinel</span>
+        <span style="font-style:normal;font-weight:600;font-size:13px;color:rgba(241,245,249,.5);margin-left:6px">Domain Intelligence</span>
       </div>
       <h1 style="font-size:18px;margin:0 0 14px">${title}</h1>
       ${bodyHtml}
@@ -39,7 +30,19 @@ async function send({ to, subject, html, text }) {
     console.log(`\n[email:console] To: ${to}\nSubject: ${subject}\n${text || '(html email)'}\n`);
     return { consoleMode: true };
   }
-  return transporter.sendMail({ from: FROM, to, subject, html, text });
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ from: FROM, to: [to], subject, html, text }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Resend send failed: ${res.status} ${detail}`);
+  }
+  return res.json();
 }
 
 function sendMagicLink(to, url) {
