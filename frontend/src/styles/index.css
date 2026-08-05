@@ -1,0 +1,166 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-surface-soft font-sans text-ink-soft antialiased;
+    min-height: 100vh;
+  }
+
+  /* Keyboard-only focus ring — mouse clicks stay clean, keyboard users get a
+     clearly visible indicator (accessibility parity with the legacy app). */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand ring-offset-2 ring-offset-surface;
+    border-radius: 0.5rem;
+  }
+
+  ::selection {
+    background: rgba(109, 40, 217, 0.16);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display text-ink;
+    text-wrap: balance;
+  }
+
+  /* Slim, unobtrusive scrollbars to match the premium surface treatment. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-line-strong;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+}
+
+@layer components {
+  /* Reusable surface treatments — kept as component classes so every card in the
+     app shares one definition instead of repeating long utility strings. */
+  .surface-card {
+    @apply rounded-2xl border border-line bg-surface shadow-card;
+  }
+
+  .surface-glass {
+    @apply border border-white/60 bg-white/80 backdrop-blur-xl;
+  }
+
+  .mono {
+    @apply font-mono text-[12.5px];
+  }
+
+  /* Section shell: consistent max width + gutters at every breakpoint. */
+  .shell {
+    @apply mx-auto w-full max-w-[1180px] px-5 sm:px-6 lg:px-8;
+  }
+
+  .eyebrow {
+    @apply text-2xs font-semibold uppercase tracking-[0.16em] text-brand;
+  }
+
+  /* Skeleton shimmer used by every loading state. */
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-surface-muted;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 animate-shimmer;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85), transparent);
+    transform: translateX(-100%);
+  }
+}
+
+/* Respect users who ask for less motion — disables the decorative float/drift
+   animations and shortens transitions, matching the legacy app's behaviour. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Print / PDF export: strip interactive chrome, reveal every pane, keep colour.
+   Mirrors the legacy @media print block so "Export PDF" still produces a report. */
+@media print {
+  @page {
+    margin: 12mm;
+  }
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    animation: none !important;
+    transition: none !important;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  [data-print='hide'] {
+    display: none !important;
+  }
+  [data-print='show'] {
+    display: block !important;
+  }
+  .surface-card {
+    box-shadow: none !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}
+
+/* Branded PDF header — hidden on screen, revealed only for print.
+   Injected by exportPdf() in ResultsView and removed after the dialog closes. */
+#pdfPrintHeader {
+  display: none;
+}
+
+@media print {
+  #pdfPrintHeader {
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0 0 0.875rem;
+    margin-bottom: 1rem;
+    border-bottom: 2px solid #6d28d9;
+  }
+  #pdfPrintHeader .pdf-wm {
+    font-family: Manrope, Inter, sans-serif;
+    font-weight: 800;
+    font-size: 1.25rem;
+    letter-spacing: -0.02em;
+    color: #0f172a;
+  }
+  #pdfPrintHeader .pdf-meta {
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.6875rem;
+    color: #64748b;
+  }
+}
