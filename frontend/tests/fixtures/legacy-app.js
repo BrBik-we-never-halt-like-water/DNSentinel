@@ -1,0 +1,3136 @@
+
+// ── State ──────────────────────────────────────────────────────
+const S = { dns:null, whois:null, ssl:null, geoip:null, ports:null, bl:null, prop:null, headers:null, dnssec:null, ocsp:null, mtasts:null, redirect:null, tech:null, http:null, mx:null, trace:null, cors:null, robots:null, ct:null, emailsec:null, takeover:null, hsts:null, csp:null, typosquat:null, ipv6:null, dnssecChain:null };
+
+// ── Record type colour map ─────────────────────────────────────
+const TC = {
+  A:    { bg:'rgba(99,102,241,.1)',    bd:'rgba(99,102,241,.32)',    fg:'#818cf8' },
+  AAAA: { bg:'rgba(99,102,241,.1)',    bd:'rgba(99,102,241,.32)',    fg:'#818cf8' },
+  MX:   { bg:'rgba(167,139,250,.1)', bd:'rgba(167,139,250,.32)', fg:'#a78bfa' },
+  TXT:  { bg:'rgba(245,158,11,.1)',  bd:'rgba(245,158,11,.32)',  fg:'#f59e0b' },
+  NS:   { bg:'rgba(16,185,129,.1)',  bd:'rgba(16,185,129,.32)',  fg:'#10b981' },
+  CNAME:{ bg:'rgba(96,165,250,.1)',  bd:'rgba(96,165,250,.32)',  fg:'#60a5fa' },
+  SOA:  { bg:'rgba(244,114,182,.1)', bd:'rgba(244,114,182,.32)', fg:'#f472b6' },
+  CAA:  { bg:'rgba(251,146,60,.1)',  bd:'rgba(251,146,60,.32)',  fg:'#fb923c' },
+  SRV:  { bg:'rgba(167,139,250,.1)', bd:'rgba(167,139,250,.32)', fg:'#a78bfa' },
+  PTR:  { bg:'rgba(148,163,184,.1)', bd:'rgba(148,163,184,.32)', fg:'#94a3b8' },
+};
+function tc(type){ return TC[type]||{bg:'rgba(255,255,255,.07)',bd:'rgba(255,255,255,.2)',fg:'#f1f5f9'}; }
+
+// ── Plain-language explainers ──────────────────────────────────
+// One entry per result tab: what the check is, why a non-expert should care,
+// and a one-line expert note. Rendered as a quiet <details> above each pane.
+const EXPLAIN = {
+  dns: { title:'DNS records',
+    what:'DNS records are the address book of your domain — they tell the internet where your website, email and other services live.',
+    why:'Wrong or missing records mean visitors can’t reach your site or your email silently breaks.',
+    expert:'Shows A/AAAA/MX/TXT/NS/CNAME/SOA/CAA/SRV/PTR from the selected resolver profile.' },
+  whois: { title:'WHOIS / registration',
+    what:'The public registration record for the domain: who registered it, through which registrar, and when it expires.',
+    why:'If the registration lapses, the domain can be lost or bought by someone else — expiry is the single most catastrophic thing to miss.',
+    expert:'RDAP is queried first (structured data), with legacy WHOIS as fallback.' },
+  geoip: { title:'GeoIP',
+    what:'Where in the world the server behind this domain is located, and which network/company operates it.',
+    why:'Useful for latency, data-residency and spotting unexpected hosting changes.',
+    expert:'Resolves the first A record and looks it up via ipwho.is.' },
+  propagation: { title:'DNS propagation',
+    what:'Checks whether major public DNS resolvers around the world all return the same answer for this domain.',
+    why:'After you change DNS, some visitors can be sent to the old server for hours. Inconsistent answers can also indicate hijacking.',
+    expert:'Queries Google, Cloudflare, Quad9, OpenDNS, Comodo, Level3, Verisign in parallel.' },
+  ssl: { title:'SSL/TLS',
+    what:'The certificate and encryption settings that put the padlock in the browser and keep traffic private.',
+    why:'An expired certificate takes your site down with a scary browser warning; weak settings let attackers eavesdrop or tamper.',
+    expert:'SSL-Labs-style grading: protocol support (SSLv3→TLS1.3), cipher/PFS analysis, chain validation with AIA fetching, known-vuln checks.' },
+  security: { title:'the security overview',
+    what:'A quick pass/fail across the most fundamental protections: SPF, DMARC, CAA, MX and blacklist status.',
+    why:'These five basics stop the most common real-world attacks: email spoofing and rogue certificates.',
+    expert:'Derived from DNS insights + DNSBL results; the deeper per-topic tabs have full detail.' },
+  headers: { title:'security headers',
+    what:'Extra instructions your website sends browsers, telling them to block common attack techniques.',
+    why:'They are free, one-line protections against clickjacking, content-sniffing and downgrade attacks — most sites simply forget them.',
+    expert:'Checks HSTS, CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy and flags deprecated ones.' },
+  csp: { title:'Content-Security-Policy',
+    what:'A browser rule-set that says which scripts and resources are allowed to run on your pages.',
+    why:'CSP is the strongest defence against XSS — injected malicious scripts simply refuse to run.',
+    expert:'Grades directive quality; unsafe-inline/unsafe-eval and wildcards are penalized, nonce/strict-dynamic rewarded.' },
+  dnssec: { title:'DNSSEC',
+    what:'Cryptographic signatures on your DNS records, so resolvers can verify answers weren’t forged.',
+    why:'Without it, attackers can poison DNS caches and silently redirect your visitors to fake servers.',
+    expert:'Checks DNSKEY/DS/RRSIG presence and consistency.' },
+  'dnssec-chain': { title:'the DNSSEC chain of trust',
+    what:'DNSSEC only works if every level — root, TLD, and your zone — links its signatures correctly. This walks the whole chain.',
+    why:'A broken link anywhere silently disables the protection (or worse, makes your domain unresolvable for validating resolvers).',
+    expert:'Validates root → TLD → zone: DS at parent must match DNSKEY at child.' },
+  ocsp: { title:'OCSP / revocation',
+    what:'How browsers find out if your certificate has been cancelled (revoked) before its expiry date.',
+    why:'If a certificate’s key leaks, revocation is the only kill-switch — and stapling makes checking it fast and private.',
+    expert:'Checks OCSP responder presence, CRL distribution points and stapling support.' },
+  hsts: { title:'HSTS preload',
+    what:'A browser-built-in list of domains that must always use HTTPS — even on the very first visit.',
+    why:'Being preloaded closes the one window (the first insecure request) where an attacker on public Wi-Fi can hijack visitors.',
+    expert:'Checks the Strict-Transport-Security header (max-age ≥1y, includeSubDomains, preload) and Chrome preload list membership.' },
+  takeover: { title:'subdomain takeover',
+    what:'Looks for subdomains that point at cloud services (Heroku, S3, GitHub Pages…) which nobody claims anymore.',
+    why:'Anyone can register the abandoned service name and serve their own content — phishing pages — under YOUR domain.',
+    expert:'Detects dangling CNAMEs against known-fingerprint SaaS targets.' },
+  emailsec: { title:'email authentication',
+    what:'SPF, DKIM and DMARC — the three records that prove an email really came from your domain.',
+    why:'Without them, anyone can send convincing fake mail as you (invoices, password resets), and your own mail lands in spam.',
+    expert:'SPF policy strength, DMARC policy/pct/rua, DKIM selector discovery, BIMI bonus.' },
+  mx: { title:'MX / SMTP',
+    what:'The mail servers that receive email for this domain, and whether they accept encrypted delivery.',
+    why:'A single mail server is a single point of failure; missing STARTTLS means mail to you can be read in transit.',
+    expert:'Resolves MX records and probes each server’s SMTP banner + STARTTLS support.' },
+  mtasts: { title:'MTA-STS & DANE',
+    what:'Rules telling other mail servers to only deliver email to you over verified, encrypted connections.',
+    why:'Ordinary email encryption is trivially stripped by an attacker in the middle — MTA-STS/DANE make the encryption mandatory.',
+    expert:'Checks _mta-sts TXT + HTTPS policy file (mode enforce/testing) and TLSA records.' },
+  ipv6: { title:'IPv6',
+    what:'Whether the site is reachable over IPv6, the modern internet addressing standard.',
+    why:'A growing share of users (especially mobile) are IPv6-first; without it they reach you via slower translation layers — or not at all.',
+    expert:'AAAA presence, dual-stack, TLS handshake over v4 vs v6.' },
+  trace: { title:'connectivity',
+    what:'Basic reachability of the server: which IP addresses answer, over IPv4 and IPv6.',
+    why:'If nothing answers here, everything else is moot — the host is down or firewalled.',
+    expert:'A/AAAA resolution + reachability summary.' },
+  ports: { title:'the port scan',
+    what:'Knocks on the most common network "doors" (web, email, SSH, databases) to see which are open to the whole internet.',
+    why:'Databases or remote-desktop ports open to the world are among the most exploited misconfigurations anywhere.',
+    expert:'TCP connect scan of ~13 common ports, 2.5s timeout each.' },
+  http: { title:'HTTP features',
+    what:'How modern and efficient the web server setup is: HTTP/2/3, compression, and key headers.',
+    why:'Modern protocols and compression make the site noticeably faster for every visitor — and Google ranks on speed.',
+    expert:'Scores HTTP/2/3, brotli/gzip, HSTS, CSP, frame and referrer policies.' },
+  redirect: { title:'the redirect chain',
+    what:'What happens step-by-step when someone types your domain: every redirect hop until the final page.',
+    why:'Sites that don’t immediately redirect to HTTPS leave visitors exposed; long chains slow down every first visit.',
+    expert:'Follows up to the final hop recording status codes and timing.' },
+  tech: { title:'the technology fingerprint',
+    what:'The software visibly running the site: CMS, frameworks, hosting, analytics.',
+    why:'Useful for audits — and a reminder of what an attacker can see: advertised software versions invite targeted exploits.',
+    expert:'Passive fingerprinting from headers, cookies and HTML patterns.' },
+  cors: { title:'CORS',
+    what:'Rules controlling which OTHER websites are allowed to read data from this site inside a browser.',
+    why:'An over-permissive policy can let any malicious site read your users’ private data using their own logged-in session.',
+    expert:'Inspects Access-Control-Allow-Origin/Credentials/Methods responses.' },
+  robots: { title:'robots.txt & sitemap',
+    what:'The files that tell search engines what to index and where to find your pages.',
+    why:'A broken robots.txt can accidentally hide your whole site from Google — or expose paths you meant to keep quiet.',
+    expert:'Fetches /robots.txt and referenced sitemaps.' },
+  ct: { title:'Certificate Transparency',
+    what:'Public logs recording every certificate ever issued for your domain.',
+    why:'If a certificate appears here that you didn’t request, someone else may be impersonating your domain.',
+    expert:'Queries CT logs (crt.sh) for recent issuances.' },
+  typosquat: { title:'typosquatting',
+    what:'Checks whether look-alike misspellings of your domain (gooogle.com, githb.com…) are registered by someone.',
+    why:'Registered typos are the raw material of phishing campaigns against your users and brand.',
+    expert:'Generates common typo/homoglyph variants and checks registration.' },
+};
+
+const EXPLAIN_KEY='hetops_explain_open';
+function explainPrefs(){ try{ return JSON.parse(localStorage.getItem(EXPLAIN_KEY)||'{}'); }catch(e){ return {}; } }
+// Inject one collapsed explainer per pane. They are SIBLINGS of the content div,
+// so render*() innerHTML rewrites never touch them. Open state persists per tab.
+function initExplainers(){
+  const prefs=explainPrefs();
+  Object.entries(EXPLAIN).forEach(([tabId,ex])=>{
+    const pane=$('pane-'+tabId); if(!pane || pane.querySelector(':scope > details.explain')) return;
+    const d=document.createElement('details');
+    d.className='explain';
+    if(prefs[tabId]) d.open=true;
+    d.innerHTML=`<summary>What is ${esc(ex.title)}? <span class="explain-hint">plain-English</span></summary>
+      <div class="explain-body">
+        <p>${esc(ex.what)}</p>
+        <p><span class="explain-why">Why it matters:</span> ${esc(ex.why)}</p>
+        ${ex.expert?`<p class="explain-expert">${esc(ex.expert)}</p>`:''}
+      </div>`;
+    d.addEventListener('toggle',()=>{
+      const p=explainPrefs();
+      if(d.open) p[tabId]=1; else delete p[tabId];
+      try{ localStorage.setItem(EXPLAIN_KEY,JSON.stringify(p)); }catch(e){}
+    });
+    pane.insertBefore(d, pane.firstElementChild);
+  });
+}
+
+// ── DOM helpers ────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+function esc(v){ const d=document.createElement('div'); d.textContent=String(v??''); return d.innerHTML; }
+function norm(s){ return s.trim().toLowerCase().replace(/^https?:\/\//,'').replace(/\/.*$/,'').replace(/\.$/,''); }
+function setStat(id,text,cls){ const e=$(id); e.className='stat-val'+(cls?' '+cls:''); e.style.height=''; e.style.width=''; e.textContent=text; }
+function safeCopy(s){
+  const text = String(s || '');
+  const escapedBackslashes = text.split('\\').join('\\\\');
+  return escapedBackslashes.split("'").join(String.raw`\'`);
+}
+
+// ── Toast notifications ────────────────────────────────────────
+const TOAST_ICONS = { ok:'check-circle', err:'alert-circle', warn:'alert-triangle', info:'info' };
+function toast(msg, type='info', ms=3200){
+  const stack=$('toastStack'); if(!stack) return;
+  const el=document.createElement('div');
+  el.className='toast '+type;
+  el.innerHTML=`<span class="toast-ico"><i data-lucide="${TOAST_ICONS[type]||'info'}"></i></span><span class="toast-msg">${esc(msg)}</span>`;
+  stack.appendChild(el);
+  if(window.lucide) lucide.createIcons({ root: el });
+  const close=()=>{ if(!el.isConnected) return; el.classList.add('leaving'); setTimeout(()=>el.remove(),280); };
+  if(ms>0) setTimeout(close, ms);
+  el.addEventListener('click', close);
+  return el;
+}
+
+// ── Copy to clipboard ──────────────────────────────────────────
+function cp(txt,btn){
+  navigator.clipboard.writeText(txt).then(()=>{
+    if(btn){ const o=btn.textContent; btn.textContent='Copied!'; btn.style.color='var(--brand)';
+      setTimeout(()=>{ btn.textContent=o; btn.style.color=''; },1600); }
+    toast('Copied to clipboard','ok',1800);
+  }).catch(()=>toast('Could not copy to clipboard','err'));
+}
+// Attribute-safe escaping (esc() does NOT escape quotes, so it's unsafe for attributes).
+function escAttr(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// Copy from a data-copy attribute — keeps untrusted values out of inline JS (XSS-safe).
+function cpEl(btn){ cp(btn.getAttribute('data-copy')||'', btn); }
+
+// ── Focus trap for modal overlays ──────────────────────────────
+// Keeps keyboard focus inside an open dialog and restores it to the trigger on
+// close — without this, Tab walks into the page behind the modal.
+let _trapEl=null, _trapReturn=null, _trapHandler=null;
+const FOCUSABLE='a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+function trapFocus(el){
+  if(!el) return;
+  releaseFocus();
+  _trapEl=el; _trapReturn=document.activeElement;
+  _trapHandler=(e)=>{
+    if(e.key!=='Tab') return;
+    const items=[...el.querySelectorAll(FOCUSABLE)].filter(n=>n.offsetParent!==null);
+    if(!items.length) return;
+    const first=items[0], last=items[items.length-1];
+    if(e.shiftKey && document.activeElement===first){ e.preventDefault(); last.focus(); }
+    else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); }
+  };
+  document.addEventListener('keydown', _trapHandler, true);
+  const target=el.querySelector(FOCUSABLE);
+  if(target) setTimeout(()=>target.focus(), 60);
+}
+function releaseFocus(){
+  if(_trapHandler) document.removeEventListener('keydown', _trapHandler, true);
+  if(_trapReturn && typeof _trapReturn.focus==='function'){ try{ _trapReturn.focus(); }catch(e){} }
+  _trapEl=null; _trapReturn=null; _trapHandler=null;
+}
+
+// ── Tab switching ──────────────────────────────────────────────
+function tab(name){
+  document.querySelectorAll('.tab-btn').forEach(b=>{ b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
+  document.querySelectorAll('[id^="pane-"]').forEach(p=>p.style.display='none');
+  const btn=$('tab-'+name);
+  if(btn){ btn.classList.add('active'); btn.setAttribute('aria-selected','true'); scrollTabIntoView(btn); }
+  const pane=$('pane-'+name);
+  if(!pane) return;   // guard: a finding may deep-link to a category with no own pane
+  pane.style.display='';
+  pane.style.animation='none';
+  pane.getBoundingClientRect();
+  pane.style.animation='';
+}
+
+// Center the active (sub/category) tab within its horizontal strip — scrolls only
+// the strip, never the page, so switching tabs can't cause a vertical jump.
+function scrollTabIntoView(btn){
+  try{
+    const strip=btn.closest('.sub-tabs-wrap, .cat-tabs'); if(!strip) return;
+    const b=btn.getBoundingClientRect(), s=strip.getBoundingClientRect();
+    const delta=(b.left+b.width/2)-(s.left+s.width/2);
+    if(Math.abs(delta)<2) return;
+    const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+    strip.scrollBy({ left: delta, behavior: reduce?'auto':'smooth' });
+  }catch(e){}
+}
+
+// ── Category selection ─────────────────────────────────────────
+const CAT_FIRST = { overview:'overview', core:'dns', security:'ssl', email:'emailsec', network:'ipv6', web:'http', intelligence:'ct' };
+// Which category each result tab belongs to (drives live per-category issue counts).
+const TAB_CAT = {
+  dns:'core', whois:'core', geoip:'core', propagation:'core',
+  ssl:'security', security:'security', headers:'security', csp:'security', dnssec:'security',
+  'dnssec-chain':'security', ocsp:'security', hsts:'security', takeover:'security',
+  emailsec:'email', mx:'email', mtasts:'email',
+  ipv6:'network', trace:'network', ports:'network',
+  http:'web', redirect:'web', tech:'web', cors:'web', robots:'web',
+  ct:'intelligence', typosquat:'intelligence',
+};
+function selectCat(name){
+  document.querySelectorAll('.cat-tab').forEach(b=>{ b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
+  document.querySelectorAll('.sub-tabs-group').forEach(g=>g.style.display='none');
+  const cb=$('cat-'+name);
+  if(cb){ cb.classList.add('active'); cb.setAttribute('aria-selected','true'); scrollTabIntoView(cb); }
+  $('cat-'+name+'-tabs').style.display='flex';
+  tab(CAT_FIRST[name]);
+}
+
+// ── Quick search ───────────────────────────────────────────────
+function quickSearch(d){ $('searchInput').value=d; runLookup(); }
+
+// ── Main lookup ────────────────────────────────────────────────
+let currentRun = null;   // AbortController for the in-flight analysis
+let runToken = 0;        // guards late callbacks from superseded runs
+let analyzing = false;   // true while an analysis is in flight (drives scorecard loading state)
+
+// Promise-based delay that rejects if the run is aborted mid-wait.
+function sleep(ms, signal){
+  return new Promise((resolve, reject) => {
+    if(signal && signal.aborted) return reject(new DOMException('Aborted','AbortError'));
+    const t = setTimeout(resolve, ms);
+    if(signal) signal.addEventListener('abort', () => {
+      clearTimeout(t); reject(new DOMException('Aborted','AbortError'));
+    }, {once:true});
+  });
+}
+
+// POST a JSON request with abort support and automatic 429 back-off/retry.
+async function fetchJSON(url, body, signal, attempt=0){
+  const r = await fetch(url, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body),
+    signal
+  });
+  if(r.status===429 && attempt<4){
+    const retryAfter = parseFloat(r.headers.get('Retry-After'));
+    const wait = retryAfter>0 ? retryAfter*1000 : Math.min(8000, 500*(2**attempt)) + Math.random()*300;
+    await sleep(wait, signal);
+    return fetchJSON(url, body, signal, attempt+1);
+  }
+  return r.json();
+}
+
+// Drain an ordered list of task thunks with bounded concurrency (request waves).
+// Earlier tasks start first, so high-priority panels resolve sooner.
+async function runPool(tasks, concurrency, signal){
+  let i = 0;
+  const workers = Array.from({length: Math.min(concurrency, tasks.length)}, async () => {
+    while(i < tasks.length){
+      if(signal && signal.aborted) return;
+      const task = tasks[i++];
+      try { await task(); } catch(_){ /* per-task errors are handled inside the task */ }
+    }
+  });
+  await Promise.all(workers);
+}
+
+async function runLookup(){
+  const raw=$('searchInput').value.trim(); if(!raw) return;
+  const domain=norm(raw); if(!domain) return;
+
+  // A new analysis supersedes any in-flight one — cancel its pending requests.
+  if(currentRun) currentRun.abort();
+  currentRun = new AbortController();
+  const signal = currentRun.signal;
+  const myToken = ++runToken;
+
+  saveHistory(domain);
+  syncURL(domain);
+  hideHistoryDropdown();
+  const analyzeBtn = document.querySelector('.btn-analyze');
+  if(analyzeBtn){ analyzeBtn.disabled = true; analyzeBtn.textContent = 'Analyzing…'; }
+
+  $('hero').className='hero compact';
+  $('results').style.display='';
+  $('currentDomain').textContent=domain;
+  $('domainChips').innerHTML='';
+  $('scoreNum').textContent='—'; scoreTarget=null;
+  $('scoreArc').style.strokeDashoffset='232.5';
+  $('gradeLetter').textContent='';
+
+  ['sDns','sSsl','sEmail','sBl'].forEach(id=>{
+    const e=$(id); e.className='skel stat-val'; e.textContent='';
+    e.style.height='26px'; e.style.width=id==='sDns'?'44px':'72px';
+  });
+
+  const sp='<div class="load-spinner"></div>';
+  $('dnsGrid').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Resolving DNS records…</div></div>';
+  $('whoisContent').innerHTML='<div class="load-box pulse-anim">'+sp+'Fetching WHOIS data…</div>';
+  $('sslContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Checking SSL certificate…</div></div>';
+  $('secContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Running security checks…</div></div>';
+  $('propContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Checking global propagation…</div></div>';
+  $('geoContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Resolving GeoIP…</div></div>';
+  $('portsContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Scanning common ports…</div></div>';
+  $('headersContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Analyzing security headers…</div></div>';
+  $('dnssecContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Checking DNSSEC configuration…</div></div>';
+  $('ocspContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Checking certificate revocation status…</div></div>';
+  $('mtastsContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Checking MTA-STS and DANE…</div></div>';
+  $('redirectContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Tracing redirect chain…</div></div>';
+  $('techContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Detecting technologies…</div></div>';
+  $('httpContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Analyzing HTTP features…</div></div>';
+  $('mxContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Analyzing MX servers…</div></div>';
+  $('traceContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Checking connectivity…</div></div>';
+  $('corsContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Analyzing CORS policy…</div></div>';
+  $('robotsContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Checking robots.txt…</div></div>';
+  $('ctContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Checking Certificate Transparency…</div></div>';
+  $('emailsecContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Analyzing email authentication…</div></div>';
+  $('takeoverContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Scanning for subdomain takeover vulnerabilities…</div></div>';
+  $('hstsContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Checking HSTS preload status…</div></div>';
+  $('cspContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Analyzing Content Security Policy…</div></div>';
+  $('typosquatContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Checking for registered typosquat domains…</div></div>';
+  $('ipv6Content').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Testing IPv6 reachability…</div></div>';
+  $('dnssecChainContent').innerHTML='<div class="card"><div class="load-box pulse-anim">'+sp+'Validating DNSSEC chain of trust…</div></div>';
+
+  Object.keys(S).forEach(k=>S[k]=null);
+  analyzing = true;
+  $('overviewContent').innerHTML='<div class="card"><div class="load-box pulse-anim"><div class="load-spinner"></div>Building overview…</div></div>';
+  renderScorecard();          // show the scorecard's "analyzing…" state immediately
+  selectCat('overview');      // land on the plain-language summary, not raw DNS
+  await go(domain, signal, myToken);
+}
+
+async function go(domain, signal, myToken){
+  // Build a task per endpoint. Each fetches, then renders — failures degrade to
+  // an error panel instead of an endless spinner, and a render throw is logged
+  // rather than killing the whole run. Ordered by priority: headline stats and
+  // the default-visible (core) panels resolve first.
+  let failed = 0;
+  const mk = (url, body, handler) => async () => {
+    let d;
+    try {
+      d = await fetchJSON(url, body, signal);
+    } catch(e){
+      if(e && e.name==='AbortError') return;       // superseded by a newer run
+      d = { error: 'Request failed — please retry.' };
+    }
+    if(myToken !== runToken) return;                // a newer analysis took over
+    if(d && d.error) failed++;
+    try { handler(d); } catch(err){ console.error('render error:', url, err); }
+  };
+
+  const tasks = [
+    mk('/api/dns-lookup',{domain,resolver:'balanced'},d=>{ S.dns=d; renderDns(d); setStat('sDns',d?.summary?.totalRecords??d?.totals?.records??0,''); renderSec(); score(); updateTabHealth(); }),
+    mk('/api/ssl',{domain},d=>{ S.ssl=d; renderSsl(d); sslStat(d); score(); updateTabHealth(); }),
+    mk('/api/blacklist-check',{domain},d=>{ S.bl=d; blStat(d); renderSec(); score(); }),
+    mk('/api/email-security',{domain},d=>{ S.emailsec=d; renderEmailSec(d); emailSecStat(d); score(); updateTabHealth(); }),
+    mk('/api/whois',{domain},d=>{ S.whois=d; renderWhois(d); }),
+    mk('/api/security-headers',{domain},d=>{ S.headers=d; renderHeaders(d); }),
+    mk('/api/dnssec',{domain},d=>{ S.dnssec=d; renderDnssec(d); }),
+    mk('/api/propagation',{domain,type:'A'},d=>{ S.prop=d; renderProp(d); }),
+    mk('/api/mx-smtp',{domain},d=>{ S.mx=d; renderMx(d); }),
+    mk('/api/trace',{domain},d=>{ S.trace=d; renderTrace(d); }),
+    mk('/api/tech',{domain},d=>{ S.tech=d; renderTech(d); }),
+    mk('/api/http',{domain},d=>{ S.http=d; renderHttp(d); updateTabHealth(); }),
+    mk('/api/redirect',{domain},d=>{ S.redirect=d; renderRedirect(d); }),
+    mk('/api/cors',{domain},d=>{ S.cors=d; renderCors(d); }),
+    mk('/api/robots',{domain},d=>{ S.robots=d; renderRobots(d); }),
+    mk('/api/cert-transparency',{domain},d=>{ S.ct=d; renderCt(d); }),
+    mk('/api/geoip',{domain},d=>{ S.geoip=d; renderGeo(d); score(); }),
+    mk('/api/port-scan',{domain},d=>{ S.ports=d; renderPorts(d); }),
+    mk('/api/ocsp',{domain},d=>{ S.ocsp=d; renderOcsp(d); }),
+    mk('/api/mta-sts',{domain},d=>{ S.mtasts=d; renderMtasts(d); }),
+    mk('/api/subdomain-takeover',{domain},d=>{ S.takeover=d; renderTakeover(d); }),
+    mk('/api/hsts-preload',{domain},d=>{ S.hsts=d; renderHsts(d); }),
+    mk('/api/csp-analyzer',{domain},d=>{ S.csp=d; renderCsp(d); }),
+    mk('/api/typosquat',{domain},d=>{ S.typosquat=d; renderTyposquat(d); updateTabHealth(); }),
+    mk('/api/ipv6',{domain},d=>{ S.ipv6=d; renderIpv6(d); updateTabHealth(); }),
+    mk('/api/dnssec-chain',{domain},d=>{ S.dnssecChain=d; renderDnssecChain(d); }),
+  ];
+
+  // 6 concurrent requests keeps the UI responsive and stays well under server limits.
+  await runPool(tasks, 6, signal);
+
+  if(signal.aborted || myToken !== runToken){ analyzing = false; return; }  // a newer run owns the UI now
+  const analyzeBtn = document.querySelector('.btn-analyze');
+  if(analyzeBtn){ analyzeBtn.disabled = false; analyzeBtn.textContent = 'Analyze →'; }
+
+  analyzing = false;
+  renderScorecard();
+  syncWatchBtn();
+  const prevSnap = saveSnapshot(domain);
+
+  if(failed === 0) toast(`Analysis complete for ${domain}`, 'ok');
+  else if(failed >= tasks.length) toast(`Analysis failed — could not reach ${domain}`, 'err');
+  else toast(`Analysis complete · ${failed} check${failed!==1?'s':''} unavailable`, 'warn');
+  notifyGradeChange(prevSnap, domain);
+
+  // Honour a ?tab= deep-link once the report is populated.
+  if(window.__pendingTab){ deepLinkTab(window.__pendingTab); window.__pendingTab=null; }
+}
+
+// ── Render: DNS (masonry layout) ────────────────────────────────
+function renderDns(data){
+  const res=data.results||{};
+  const ORDER=['A','AAAA','CNAME','MX','NS','TXT','SOA','CAA','SRV','PTR'];
+  const WIDE=new Set(['TXT','SOA','CAA','SRV']);
+  const active=ORDER.filter(t=>(res[t]||[]).length>0);
+  if(!active.length){
+    $('dnsGrid').innerHTML='<div class="card"><div class="load-box" style="color:var(--text-muted)">No DNS records found.</div></div>';
+    return;
+  }
+
+  // Build a card object per record type
+  const cards=active.map(type=>{
+    const recs=res[type]||[];
+    const c=tc(type); const wide=WIDE.has(type);
+    let rows='';
+    for(const r of recs){
+      let val='',meta='';
+      if(type==='MX'){val=esc(r.value);meta=`<span class="rmeta">Priority ${esc(r.priority)}</span>`;}
+      else if(type==='SOA'){const d=r.details||{};val=esc(r.value);meta=`<span class="rmeta">serial ${d.serial} · refresh ${d.refresh}s · retry ${d.retry}s · expire ${d.expire}s</span>`;}
+      else if(type==='SRV'){val=esc(r.value);meta=`<span class="rmeta">priority ${r.priority} · weight ${r.weight}</span>`;}
+      else if(type==='CAA'){val=esc(r.value);meta=`<span class="rmeta">tag: ${esc(r.issue||'')}${r.critical?' · critical':''}</span>`;}
+      else{val=`<span style="word-break:break-all">${esc(r.value)}</span>`;}
+      const ttl=r.ttl!=null?`<span class="ttl-tag">TTL ${r.ttl}</span>`:'';
+      rows+=`<div class="record-row">
+        <div class="rtype-badge" style="background:${c.bg};border:1px solid ${c.bd};color:${c.fg}">${type}</div>
+        <div class="rvalue">${val}${meta}</div>
+        <div class="record-actions">${ttl}<button class="copy-btn" data-copy="${escAttr(r.value)}" onclick="cpEl(this)">Copy</button></div>
+      </div>`;
+    }
+    let annot='';
+    if(type==='TXT'){
+      const spf=recs.find(r=>String(r.value||'').toLowerCase().startsWith('v=spf1'));
+      const dmarc=recs.find(r=>String(r.value||'').toLowerCase().startsWith('v=dmarc1'));
+      if(spf||dmarc) annot=`<div class="record-annot" style="background:rgba(245,158,11,.05);border-color:rgba(245,158,11,.15);color:rgba(245,158,11,.75)">${[spf?'✓ SPF present':null,dmarc?'✓ DMARC present':null].filter(Boolean).join(' · ')}</div>`;
+    }
+    const html=`<div class="card dns-card">
+      <div class="dns-card-head">
+        <div class="dns-card-title">
+          <span class="rtype-badge" style="background:${c.bg};border:1px solid ${c.bd};color:${c.fg};font-size:10px">${type}</span>
+          <span>${type} Records</span>
+        </div>
+        <span class="dns-count">${recs.length} record${recs.length!==1?'s':''}</span>
+      </div>
+      ${rows}${annot}
+    </div>`;
+    // Estimate pixel height for masonry distribution
+    const estH=52+recs.length*46+(annot?28:0);
+    return {html,wide,estH};
+  });
+
+  // Full-width cards (TXT, SOA, CAA, SRV)
+  const wideCards=cards.filter(c=>c.wide);
+  // Narrow cards — greedy two-column balance by estimated height
+  const narrowCards=cards.filter(c=>!c.wide);
+  let colL='',colR='',hL=0,hR=0;
+  for(const card of narrowCards){
+    if(hL<=hR){colL+=card.html;hL+=card.estH;}
+    else{colR+=card.html;hR+=card.estH;}
+  }
+
+  let html=wideCards.map(c=>c.html).join('');
+  if(colL||colR){
+    html+=`<div class="dns-masonry-grid"><div class="dns-col">${colL}</div><div class="dns-col">${colR}</div></div>`;
+  }
+  if(data.durationMs) html+=`<div style="font-size:11px;color:var(--text-faint);text-align:right;padding:6px 2px">Resolved in ${data.durationMs}ms · ${esc(data.resolver?.profile||'balanced')} resolver</div>`;
+  $('dnsGrid').innerHTML=html;
+}
+
+// ── Render: WHOIS ──────────────────────────────────────────────
+function renderWhois(data){
+  if(data.error){ $('whoisContent').innerHTML=`<div style="padding:20px;color:var(--text-muted);font-size:13px">${esc(data.error)}</div>`; return; }
+  const raw=data.rawData||'';
+  const p=parseWhois(raw);
+  const FIELDS=[
+    ['Domain Name','domain name'],['Registrar','registrar'],['IANA ID','registrar iana id'],
+    ['Registered','creation date'],['Expires','registry expiry date'],['Updated','updated date'],
+    ['Status','domain status'],['Name Servers','name server'],['DNSSEC','dnssec'],
+    ['Registrant Org','registrant organization'],['Country','registrant country'],
+    ['Abuse Email','registrar abuse contact email'],
+  ];
+  let left='',right='';
+  const half=Math.ceil(FIELDS.length/2);
+  FIELDS.forEach(([label,key],i)=>{
+    const val=p[key]; if(!val) return;
+    const multi=Array.isArray(val)?val.map(v=>esc(String(v))).join('<br>'):esc(String(val));
+    let vStyle='', extra='';
+    if(key==='registry expiry date'){
+      const exp=new Date(Array.isArray(val)?val[0]:val);
+      const days=Math.floor((exp-Date.now())/864e5);
+      vStyle=days<0?'color:var(--err)':days<30?'color:var(--err)':days<90?'color:var(--warn)':'color:var(--ok)';
+      extra=` <span style="font-size:11px;color:var(--text-muted)">(${days>0?days+'d left':'EXPIRED'})</span>`;
+    }
+    const row=`<div class="wrow"><span class="wlabel">${esc(label)}</span><span class="wvalue" style="${vStyle}">${multi}${extra}</span></div>`;
+    if(i<half) left+=row; else right+=row;
+  });
+  const fallback=left||right?'':`<div style="padding:16px;color:var(--text-muted);font-size:13px">Could not parse structured WHOIS data.</div>`;
+  $('whoisContent').innerHTML=`<div class="whois-grid" style="margin-bottom:0">
+    <div class="whois-table card-hi" style="border-radius:0;border:none;border-right:1px solid var(--border)">
+      <div class="sec-label">Registration</div>${left}
+    </div>
+    <div class="whois-table">
+      <div class="sec-label">Infrastructure</div>${right}
+    </div>
+  </div>${fallback}
+  <details class="raw-details" style="border-top:1px solid var(--border)">
+    <summary>Raw WHOIS output</summary>
+    <pre class="raw-pre">${esc(raw)}</pre>
+  </details>`;
+}
+function parseWhois(raw){
+  const o={};
+  for(const line of raw.split('\n')){
+    const m=line.match(/^\s*([^:%>\n]+):\s*(.*)$/); if(!m) continue;
+    let k=m[1].trim().toLowerCase();
+    let v=m[2].trim();
+    if(!v||v.includes('REDACTED')||v.startsWith('http')) continue;
+    
+    // Normalize aliases for common registrars (e.g. GoDaddy)
+    if(k.includes('expiration date') || k.includes('expiry date')) k = 'registry expiry date';
+    if(k === 'registrar name') k = 'registrar';
+    if(k === 'creation date') k = 'creation date';
+    
+    if(o[k]){
+      if(!Array.isArray(o[k])) o[k]=[o[k]];
+      if(!o[k].includes(v)) o[k].push(v);
+    } else {
+      o[k]=v;
+    }
+  }
+  return o;
+}
+
+// ── Render: SSL (SSL Labs Style) ─────────────────────────────────
+function renderSsl(data){
+  if(data.error){
+    $('sslContent').innerHTML=`<div class="card" style="padding:24px;display:flex;align-items:center;gap:16px">
+      <span style="font-size:40px">🔓</span>
+      <div><div style="font-size:15px;font-weight:700;color:var(--err)">SSL Unavailable</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:4px;font-family:'JetBrains Mono',monospace">${esc(data.error)}</div></div>
+    </div>`; return;
+  }
+  
+  const cert=data.certificate||data;
+  const prot=data.protocols||{};
+  const vuln=data.vulnerabilities||{};
+  const pfs=data.pfs||{};
+  const chain=data.certificate?.chain||cert.chain||[];
+  const sim=data.handshakeSimulations||[];
+  const grade=data.grade||{letter:'F',score:0,color:'var(--err)'};
+  const gc=grade.color||'var(--err)';
+  const days=cert.daysRemaining;
+  const dc=days>90?'var(--ok)':days>30?'var(--warn)':'var(--err)';
+
+  // Cert type badge (EV = gold, OV = blue, DV = default)
+  const certTypeColors={'EV':'#f59e0b','OV':'#60a5fa','DV':'var(--text-muted)'};
+  const certTypeDesc={'EV':'Extended Validation — org identity verified by CA','OV':'Organization Validation — org name verified','DV':'Domain Validation — only domain ownership checked'};
+  const ct=cert.certType||'DV';
+  const ctColor=certTypeColors[ct]||'var(--text-muted)';
+  const ctDesc=certTypeDesc[ct]||'';
+
+  // Key strength indicator
+  const ksColor=cert.keyStrength==='excellent'?'var(--ok)':cert.keyStrength==='good'?'var(--ok)':cert.keyStrength==='weak'?'var(--err)':'var(--text-muted)';
+
+  // Deep analysis flags
+  const sha1Warn=cert.sha1Signed?`<div style="margin-top:10px;padding:8px 12px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;font-size:12px;color:var(--err)">⚠ Signed with SHA-1 — deprecated and insecure</div>`:'';
+  const longLivedWarn=cert.longLivedCert?`<div style="margin-top:6px;padding:8px 12px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.2);border-radius:8px;font-size:12px;color:var(--warn)">⚠ Validity period ${cert.validityPeriodDays}d exceeds the 398-day industry maximum</div>`:'';
+  const caaMatchBadge=cert.caaMatch===true?'<span class="pill ok" style="font-size:10px">CAA Match ✓</span>':cert.caaMatch===false?'<span class="pill err" style="font-size:10px">CAA Mismatch ✗</span>':'';
+
+  const vulnHtml=Object.entries(vuln).filter(([,v])=>v.vulnerable).map(([k,v])=>`<div style="padding:6px 10px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;margin:4px 0">
+    <span style="color:var(--err);font-weight:600">⚠ ${esc(k)}</span>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(v.details||'Vulnerable')}</div>
+  </div>`).join('');
+
+  const recs=data.recommendations||[];
+  const recsHtml=recs.map(r=>`<div style="font-size:12px;color:var(--text-muted);padding:6px 10px;background:rgba(245,158,11,.06);border-radius:6px;margin:4px 0">→ ${esc(r)}</div>`).join('');
+
+  const sans=cert.subjectAltNames||[];
+  const sanShowAll=sans.length<=20;
+
+  // Chain visualization
+  const chainPemData=chain.map(c=>c.pem).filter(Boolean).join('\n');
+  const chainHtml=chain.map((c,i)=>{
+    const typeColors={'leaf':'var(--accent)','intermediate':'var(--purple)','root':'var(--brand)'};
+    const tc2=typeColors[c.type]||'var(--text-muted)';
+    const typeLabel=c.type==='leaf'?'Leaf Certificate':c.type==='root'?'Root CA':'Intermediate CA';
+    const daysLeft=c.daysRemaining;
+    const dColor=daysLeft>90?'var(--ok)':daysLeft>30?'var(--warn)':'var(--err)';
+    const fp256short=c.fingerprint256?(c.fingerprint256.split(':').join('').toLowerCase()):'';
+    const fp256display=fp256short?fp256short.match(/.{1,32}/g)?.join(' '):'';
+    const sha1Badge=c.sha1Signed?'<span class="pill err" style="font-size:9px">SHA-1 ⚠</span>':'';
+    return `<div style="border-bottom:1px solid rgba(255,255,255,.05);${i===0?'background:rgba(99,102,241,.03)':''}">
+      <div style="padding:14px 16px;display:flex;align-items:center;gap:10px;cursor:pointer" onclick="const b=this.parentElement.querySelector('.chain-body');const isHidden=b.style.display==='none';b.style.display=isHidden?'':'none';this.querySelector('.ch-chev').textContent=isHidden?'▲':'▼'">
+        <span style="display:flex;flex-direction:column;align-items:center;gap:2px">
+          ${i>0?`<span style="width:1px;height:14px;background:rgba(255,255,255,.1)"></span>`:''}
+          <span style="width:9px;height:9px;border-radius:50%;background:${tc2};box-shadow:0 0 8px ${tc2}66;flex-shrink:0"></span>
+          ${i<chain.length-1?`<span style="width:1px;height:14px;background:rgba(255,255,255,.1)"></span>`:''}
+        </span>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+            <span class="pill" style="background:${tc2}22;border-color:${tc2}44;color:${tc2};font-size:9px;padding:2px 6px">${typeLabel}</span>
+            ${sha1Badge}
+            <span style="font-weight:600;font-size:13px">${esc(c.subject?.CN||c.subject?.O||'Unknown')}</span>
+          </div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${c.issuer?.O||c.issuer?.CN?`Issued by ${esc(c.issuer.CN||c.issuer.O)}`:''}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:14px;font-weight:700;color:${dColor}">${daysLeft>0?daysLeft+'d':c.isExpired?'EXPIRED':'—'}</div>
+          <div style="font-size:9px;color:var(--text-faint)">remaining</div>
+        </div>
+        <span class="ch-chev" style="color:var(--text-faint);font-size:10px">▲</span>
+      </div>
+      <div class="chain-body" style="padding:0 16px 14px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:10px">
+          <div><span style="font-size:9px;color:var(--text-faint)">SUBJECT</span><div style="font-size:11px;color:var(--text-dim)">${esc(c.subject?.CN||'—')}</div>${c.subject?.O?`<div style="font-size:10px;color:var(--text-muted)">${esc(c.subject.O)}</div>`:''}</div>
+          <div><span style="font-size:9px;color:var(--text-faint)">ISSUER</span><div style="font-size:11px;color:var(--text-dim)">${esc(c.issuer?.CN||'—')}</div></div>
+          <div><span style="font-size:9px;color:var(--text-faint)">VALID FROM</span><div style="font-size:11px;color:var(--text-dim)">${esc(c.validFrom||'—')}</div></div>
+          <div><span style="font-size:9px;color:var(--text-faint)">EXPIRES</span><div style="font-size:11px;color:${dColor}">${esc(c.validTo||'—')}</div></div>
+          ${c.keyBits?`<div><span style="font-size:9px;color:var(--text-faint)">KEY</span><div style="font-size:11px;color:var(--text-dim)">${c.keyBits}-bit ${esc(c.keyType||'')}</div></div>`:''}
+          ${c.serialNumber?`<div><span style="font-size:9px;color:var(--text-faint)">SERIAL</span><div style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-dim);word-break:break-all">${esc(c.serialNumber)}</div></div>`:''}
+          ${c.signatureAlgorithm?`<div><span style="font-size:9px;color:var(--text-faint)">SIGNATURE</span><div style="font-size:11px;color:${c.sha1Signed?'var(--err)':'var(--text-dim)'}">${esc(c.signatureAlgorithm)}</div></div>`:''}
+          ${c.ocspURI?`<div><span style="font-size:9px;color:var(--text-faint)">OCSP</span><div style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--accent);word-break:break-all">${esc(c.ocspURI)}</div></div>`:''}
+        </div>
+        ${fp256display?`<div style="margin-bottom:8px">
+          <div style="font-size:9px;color:var(--text-faint);margin-bottom:4px">SHA-256 FINGERPRINT</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <code style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);word-break:break-all;flex:1">${esc(fp256display)}</code>
+            <button data-copy="${escAttr(fp256short)}" onclick="cpEl(this)" style="background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--text-muted);padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;white-space:nowrap">Copy</button>
+          </div>
+        </div>`:''}
+        ${c.pem?`<div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button onclick="downloadCert(${i})" style="background:var(--accent-subtle);border:1px solid var(--accent-border);color:var(--accent);padding:5px 12px;border-radius:6px;font-size:11px;cursor:pointer;font-weight:600">↓ Download PEM</button>
+          <button onclick="viewCertPem(${i})" style="background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--text-muted);padding:5px 12px;border-radius:6px;font-size:11px;cursor:pointer">View PEM</button>
+        </div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  const CLIENT_ICONS={'Firefox 120':'🦊','Chrome 120':'🌐','Safari 17':'🧭','Edge 120':'🔷','Android 13':'📱','Java 8u291':'☕','IE 11 Win 7':'🪟'};
+  function protoColor(proto,supported){
+    if(!supported) return {bg:'rgba(239,68,68,.12)',bd:'rgba(239,68,68,.3)',fg:'var(--err)'};
+    if(!proto) return {bg:'rgba(148,163,184,.1)',bd:'rgba(148,163,184,.2)',fg:'var(--text-muted)'};
+    if(proto.includes('1.3')) return {bg:'rgba(34,197,94,.12)',bd:'rgba(34,197,94,.3)',fg:'var(--ok)'};
+    if(proto.includes('1.2')) return {bg:'rgba(99,102,241,.12)',bd:'rgba(99,102,241,.3)',fg:'var(--accent)'};
+    if(proto.includes('1.1')) return {bg:'rgba(245,158,11,.12)',bd:'rgba(245,158,11,.3)',fg:'var(--warn)'};
+    return {bg:'rgba(239,68,68,.12)',bd:'rgba(239,68,68,.3)',fg:'var(--err)'};
+  }
+  const simHtml=sim.length?`
+    <div style="display:grid;grid-template-columns:1fr;gap:1px;background:rgba(255,255,255,.04);border-radius:10px;overflow:hidden;margin:2px">
+      <div style="display:grid;grid-template-columns:160px 100px 1fr 60px 36px;align-items:center;padding:7px 14px;background:rgba(0,0,0,.25)">
+        <span style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-faint);text-transform:uppercase">Client</span>
+        <span style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-faint);text-transform:uppercase">Protocol</span>
+        <span style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-faint);text-transform:uppercase">Cipher</span>
+        <span style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-faint);text-transform:uppercase;text-align:center">PFS</span>
+        <span style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-faint);text-transform:uppercase;text-align:center">OK</span>
+      </div>
+      ${sim.map(s=>{
+        const pc=protoColor(s.protocol,s.supported);
+        const icon=CLIENT_ICONS[s.client]||'💻';
+        const cipherShort=s.cipher?(s.cipher.length>28?s.cipher.slice(0,26)+'…':s.cipher):'—';
+        return `<div style="display:grid;grid-template-columns:160px 100px 1fr 60px 36px;align-items:center;padding:10px 14px;background:var(--bg-card);transition:background .15s" onmouseover="this.style.background='rgba(99,102,241,.04)'" onmouseout="this.style.background='var(--bg-card)'">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:16px;line-height:1">${icon}</span>
+            <span style="font-size:12px;font-weight:600;color:var(--text)">${esc(s.client)}</span>
+          </div>
+          <span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:5px;background:${pc.bg};border:1px solid ${pc.bd};color:${pc.fg};display:inline-block;width:fit-content">${s.protocol||'Failed'}</span>
+          <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(s.cipher||'')}">${esc(cipherShort)}</span>
+          <div style="text-align:center">${s.pfs?'<span style="font-size:10px;font-weight:700;color:var(--ok);background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);padding:2px 6px;border-radius:4px">PFS</span>':'<span style="font-size:10px;color:var(--text-faint)">—</span>'}</div>
+          <div style="text-align:center;font-size:15px">${s.supported?'<span style="color:var(--ok)">✓</span>':'<span style="color:var(--err)">✗</span>'}</div>
+        </div>`;
+      }).join('')}
+    </div>`:'<div style="padding:16px;color:var(--text-muted);font-size:13px">No simulation data available</div>';
+
+  $('sslContent').innerHTML=`
+  ${sha1Warn}${longLivedWarn}
+
+  <div style="display:grid;grid-template-columns:260px 1fr;gap:14px;margin-top:${sha1Warn||longLivedWarn?'10px':'0'}">
+    <div class="card" style="padding:24px;text-align:center">
+      <div style="font-size:10px;font-weight:700;color:var(--text-faint);letter-spacing:.1em;margin-bottom:14px">SSL GRADE</div>
+      <div style="font-family:'Manrope',sans-serif;font-size:76px;font-weight:900;color:${gc};line-height:1;text-shadow:0 0 60px ${gc}44">${grade.letter||'F'}</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-top:6px">Score: ${grade.score||0}/100</div>
+      <div style="margin:14px 0;height:4px;background:rgba(255,255,255,.05);border-radius:2px;overflow:hidden"><div style="height:100%;width:${grade.score||0}%;background:${gc};border-radius:2px"></div></div>
+      <div style="padding:12px;background:rgba(255,255,255,.03);border-radius:10px;margin-top:4px">
+        <div style="font-size:28px;font-weight:700;color:${dc}">${days>0?days:'✗'}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:2px">days remaining</div>
+      </div>
+      <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:4px;justify-content:center">
+        <span class="pill" style="background:${ctColor}22;border-color:${ctColor}44;color:${ctColor};font-size:10px" title="${ctDesc}">${ct}</span>
+        ${cert.isWildcard?'<span class="pill warn" style="font-size:10px">Wildcard</span>':''}
+        ${cert.mustStaple?'<span class="pill ok" style="font-size:10px">Must-Staple</span>':''}
+        ${caaMatchBadge}
+      </div>
+    </div>
+    <div>
+      <div class="card" style="padding:16px;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:600;color:var(--text-faint);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Protocols & Ciphers</div>
+        <div style="display:flex;flex-wrap:wrap;gap:7px">
+          ${prot.tls13?'<span class="pill ok">TLS 1.3 ✓</span>':'<span class="pill" style="background:rgba(239,68,68,.1);color:var(--err)">TLS 1.3 ✗</span>'}
+          ${prot.tls12?'<span class="pill ok">TLS 1.2 ✓</span>':'<span class="pill warn">TLS 1.2 ✗</span>'}
+          ${prot.tls11?'<span class="pill warn">TLS 1.1 ⚠</span>':''}
+          ${prot.tls10?'<span class="pill warn">TLS 1.0 ⚠</span>':''}
+          ${prot.sslv3?'<span class="pill err">SSL 3.0 ✗</span>':''}
+          ${pfs.supported?'<span class="pill ok">PFS ✓</span>':pfs.supported===false?'<span class="pill warn">No PFS ✗</span>':''}
+        </div>
+      </div>
+      <div class="card" style="padding:16px;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:600;color:var(--text-faint);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Certificate</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><span style="font-size:9px;color:var(--text-faint)">SUBJECT</span><div style="font-size:12px;font-weight:600">${esc(cert.subject?.CN||cert.subject?.O||'—')}</div></div>
+          <div><span style="font-size:9px;color:var(--text-faint)">ISSUER</span><div style="font-size:12px">${esc(cert.issuerCN||cert.issuer?.O||cert.issuer?.CN||'—')}</div></div>
+          <div><span style="font-size:9px;color:var(--text-faint)">VALID FROM</span><div style="font-size:12px">${esc(cert.validFrom||'—')}</div></div>
+          <div><span style="font-size:9px;color:var(--text-faint)">EXPIRES</span><div style="font-size:12px;color:${dc}">${esc(cert.validTo||'—')}</div></div>
+          <div><span style="font-size:9px;color:var(--text-faint)">KEY</span><div style="font-size:12px;color:${ksColor}">${cert.keyBits?cert.keyBits+'-bit '+esc(cert.keyType||''):'—'} <span style="font-size:10px">${cert.keyStrength?'('+cert.keyStrength+')':''}</span></div></div>
+          <div><span style="font-size:9px;color:var(--text-faint)">CHAIN</span><div style="font-size:12px;color:${chain.length>=2?'var(--ok)':'var(--warn)'}">${chain.length} cert${chain.length!==1?'s':''} ${chain.length>=2?'✓':'⚠'}</div></div>
+          ${cert.sanCount?`<div><span style="font-size:9px;color:var(--text-faint)">SANS</span><div style="font-size:12px">${cert.sanCount} name${cert.sanCount!==1?'s':''}</div></div>`:''}
+          ${cert.validityPeriodDays?`<div><span style="font-size:9px;color:var(--text-faint)">ISSUED FOR</span><div style="font-size:12px;color:${cert.longLivedCert?'var(--warn)':'var(--text-dim)'}">${cert.validityPeriodDays}d</div></div>`:''}
+        </div>
+        ${cert.fingerprint256?`<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.05)">
+          <div style="font-size:9px;color:var(--text-faint);margin-bottom:4px">SHA-256 FINGERPRINT</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <code style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-muted);word-break:break-all;flex:1">${esc(cert.fingerprint256)}</code>
+            <button data-copy="${escAttr(cert.fingerprint256)}" onclick="cpEl(this)" style="background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--text-muted);padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;white-space:nowrap">Copy</button>
+          </div>
+        </div>`:''}
+      </div>
+      ${sans.length?`<div class="card" style="padding:14px;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:600;color:var(--text-faint);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Subject Alt Names (${sans.length})</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:${sanShowAll?'none':'80px'};overflow:hidden" id="sanList">${sans.map(s=>`<span class="pill" style="font-family:'JetBrains Mono',monospace;font-size:10px">${esc(s)}</span>`).join('')}</div>
+        ${sans.length>20?`<button onclick="const l=$('sanList');l.style.maxHeight=l.style.maxHeight?'':'none';this.textContent=l.style.maxHeight?'Show all ${sans.length}':'Collapse'" style="margin-top:6px;background:none;border:none;color:var(--accent);font-size:11px;cursor:pointer">Show all ${sans.length}</button>`:''}
+        <button data-copy="${escAttr(sans.join('\n'))}" onclick="cpEl(this)" style="margin-top:6px;margin-left:8px;background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--text-muted);padding:3px 10px;border-radius:5px;font-size:10px;cursor:pointer">Copy all</button>
+      </div>`:''}
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px;overflow:hidden">
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div style="font-size:13px;font-weight:600">🔗 Certificate Chain (${chain.length})</div>
+      <div style="display:flex;gap:8px">
+        ${chainPemData?`<button onclick="downloadFullChain()" style="background:var(--brand-subtle);border:1px solid var(--brand-border);color:var(--brand);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:600">↓ Full Chain PEM</button>`:''}
+        ${chain[0]?.pem?`<button onclick="downloadCert(0)" style="background:var(--accent-subtle);border:1px solid var(--accent-border);color:var(--accent);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:600">↓ Leaf Cert</button>`:''}
+      </div>
+    </div>
+    ${chainHtml||'<div style="padding:20px;color:var(--text-muted)">No chain data available</div>'}
+  </div>
+
+  <div class="dns-grid" style="margin-top:14px">
+    <div class="card dns-card">
+      <div class="dns-card-head"><div class="dns-card-title">⚠ Known Vulnerabilities</div></div>
+      <div style="padding:14px">${vulnHtml||'<div style="color:var(--ok)">✓ No known vulnerabilities detected</div>'}</div>
+    </div>
+    <div class="card dns-card">
+      <div class="dns-card-head">
+        <div class="dns-card-title">🖥 Client Handshake Simulation</div>
+        <span style="font-size:11px;color:var(--text-faint)">${sim.length} clients</span>
+      </div>
+      <div style="padding:8px">${simHtml}</div>
+    </div>
+  </div>
+
+  ${recs.length?`<div class="card" style="padding:16px;margin-top:14px;border-color:rgba(245,158,11,.2);background:rgba(245,158,11,.04)">
+    <div style="font-size:13px;font-weight:600;color:var(--warn);margin-bottom:12px">💡 Recommendations</div>
+    ${recsHtml}
+  </div>`:''}`;
+}
+
+function viewCertPem(index){
+  const chain=S.ssl?.certificate?.chain||[];
+  const cert=chain[index];
+  if(!cert?.pem){ toast('PEM not available','warn'); return; }
+  const w=window.open('','_blank','width=700,height=600');
+  w.document.write(`<html><head><title>Certificate ${index} PEM</title><style>body{background:#090d18;color:#f8fafc;font-family:'Courier New',monospace;padding:20px;font-size:12px;line-height:1.5}pre{white-space:pre-wrap;word-break:break-all}</style></head><body><pre>${cert.pem.replace(/</g,'&lt;')}</pre></body></html>`);
+}
+function irow(l,v,col){
+  return `<div class="irow"><span class="ilabel">${esc(l)}</span><span class="ivalue" style="${col?'color:'+col:''}">${esc(v)}</span></div>`;
+}
+
+// ── Render: Security ───────────────────────────────────────────
+function renderSec(){
+  const ins=S.dns?.insights||{}; const chk=ins.checks||{}; const notes=ins.notes||[];
+  const bl=S.bl?.results||[]; const isListed=bl.some(r=>r.listed); const ips=S.bl?.IPsChecked||0; const blDone=S.bl!==null;
+  const items=[
+    { n:'SPF Record',       ok:chk.spf,   d:chk.spf?'Sender Policy Framework configured — spoofing restricted':'No SPF record — email spoofing risk' },
+    { n:'DMARC Policy',     ok:chk.dmarc, d:chk.dmarc?'DMARC policy present at _dmarc subdomain':'No DMARC record — phishing risk' },
+    { n:'CAA Records',      ok:chk.caa,   d:chk.caa?'CAA restricts certificate issuance to trusted CAs':'No CAA — any CA can issue certificates' },
+    { n:'MX Records',       ok:chk.mx,    d:chk.mx?'Mail exchange infrastructure configured':'No MX records — email not configured' },
+    { n:'Blacklist Status', ok:blDone&&!isListed&&ips>0, d:!blDone?'Checking…':(isListed?`Listed on ${bl.filter(r=>r.listed).length} DNSBL blacklist(s)`:`Clean across ${bl.length} DNSBL checks`) },
+  ];
+  const sc=items.filter(i=>i.ok).length;
+  const scCol=sc>=4?'var(--ok)':sc>=3?'#a3e635':sc>=2?'var(--warn)':'var(--err)';
+  const rows=items.map(i=>`<div class="chk-row">
+    <span class="chk-icon" style="color:${i.ok?'var(--ok)':'var(--err)'}">${i.ok?'✓':'✗'}</span>
+    <div style="flex:1"><div class="chk-name">${esc(i.n)}</div><div class="chk-desc">${esc(i.d)}</div></div>
+    <span class="pill ${i.ok?'ok':'err'}">${i.ok?'PASS':'FAIL'}</span>
+  </div>`).join('');
+
+  const listedHtml=isListed?`<div class="card" style="padding:16px;margin-top:14px;border-color:rgba(239,68,68,.28);background:rgba(239,68,68,.06)">
+    <div style="font-size:13px;font-weight:700;color:var(--err);margin-bottom:10px">⚠ Blacklist Hits</div>
+    ${bl.filter(r=>r.listed).map(r=>`<div style="font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--text-dim);padding:3px 0">${esc(r.ip)} — ${esc(r.blacklist)}</div>`).join('')}
+  </div>`:'';
+
+  const recs=notes.length?`<div class="card" style="padding:20px;margin-top:14px;border-color:rgba(245,158,11,.2);background:rgba(245,158,11,.06)">
+    <div style="font-size:13px;font-weight:700;color:var(--warn);margin-bottom:12px">Recommendations</div>
+    ${notes.map(n=>`<div style="font-size:13px;color:var(--text-muted);padding:8px 14px;background:rgba(245,158,11,.05);border-radius:10px;border:1px solid rgba(245,158,11,.15);margin-bottom:6px">→ ${esc(n)}</div>`).join('')}
+  </div>`:'';
+
+  $('secContent').innerHTML=`<div class="sec-layout">
+    <div class="card" style="padding:28px;text-align:center">
+      <div class="sec-label" style="padding:0 0 12px">Security Score</div>
+      <div class="big-score" style="color:${scCol};text-shadow:0 0 40px ${scCol}66">${sc}<span style="font-size:28px;color:var(--text-faint)">/5</span></div>
+      <div style="font-size:13px;color:var(--text-muted);margin-top:10px">${sc>=4?'Strong':sc>=3?'Good':sc>=2?'Fair':'Weak'}</div>
+      <div style="margin-top:20px;height:6px;background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${sc/5*100}%;background:${scCol};border-radius:3px;transition:width 1.2s cubic-bezier(.4,0,.2,1);box-shadow:0 0 16px ${scCol}88"></div>
+      </div>
+    </div>
+    <div class="card" style="overflow:hidden"><div class="sec-label">Security Checks</div>${rows}</div>
+  </div>${listedHtml}${recs}`;
+}
+
+// ── Render: Propagation ────────────────────────────────────────
+function renderProp(data){
+  if(data.error){ $('propContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const res=data.results||[];
+  const allV=res.filter(r=>r.status==='ok'&&(r.records||[]).length>0).map(r=>(r.records||[]).map(x=>x.value).sort().join(','));
+  const consistent=new Set(allV).size<=1;
+  const rows=res.map(r=>{
+    const vals=(r.records||[]).map(x=>x.value).join(', ')||'—';
+    const ok=r.status==='ok';
+    return `<div class="prop-row">
+      <div><div class="prop-name">${esc(r.name)}</div><div class="prop-loc">${esc(r.location)} · ${esc(r.ip)}</div></div>
+      <div class="prop-vals">${esc(vals)}</div>
+      <div class="prop-meta">
+        <span style="font-size:11px;color:var(--text-faint);font-family:'JetBrains Mono',monospace">${r.durationMs}ms</span>
+        <span style="font-size:16px;color:${ok?'var(--ok)':'var(--err)'}">${ok?'✓':'✗'}</span>
+      </div>
+    </div>`;
+  }).join('');
+  $('propContent').innerHTML=`<div class="card" style="overflow:hidden">
+    <div style="padding:16px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div>
+        <span style="font-size:13px;font-weight:600">Global DNS Propagation</span>
+        <span style="font-size:11px;color:var(--text-muted);margin-left:8px">${esc(data.type||'A')} records · ${esc(data.domain||'')}</span>
+      </div>
+      <span class="pill ${consistent?'ok':'warn'}">${consistent?'✓ Consistent':'⚠ Inconsistent'}</span>
+    </div>
+    ${rows}
+  </div>`;
+}
+
+// ── Render: GeoIP ──────────────────────────────────────────────
+function renderGeo(data){
+  if(data.error){ $('geoContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const g=data.geo||{};
+  const flag=cFlag(g.country_name||'');
+  const fields=[['IP Address',data.target],['City',g.city],['Region',g.region],['Country',g.country_name],['Organization',g.org],['ASN',g.asn]].filter(([,v])=>v);
+  $('geoContent').innerHTML=`<div class="geo-grid">
+    <div class="card" style="padding:24px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:16px">Network Information</div>
+      ${fields.map(([l,v])=>irow(l,v)).join('')}
+    </div>
+    <div class="card" style="padding:28px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center">
+      <div style="font-size:80px;line-height:1">${flag}</div>
+      <div style="font-size:20px;font-weight:700">${esc([g.city,g.country_name].filter(Boolean).join(', '))}</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--accent)">${esc(data.target||'')}</div>
+      ${g.org?`<span class="pill">${esc(g.org)}</span>`:''}
+    </div>
+  </div>`;
+}
+function cFlag(c){
+  const m={'United States':'🇺🇸','Germany':'🇩🇪','United Kingdom':'🇬🇧','France':'🇫🇷','Japan':'🇯🇵','Canada':'🇨🇦','Australia':'🇦🇺','Singapore':'🇸🇬','Netherlands':'🇳🇱','India':'🇮🇳','Brazil':'🇧🇷','China':'🇨🇳','South Korea':'🇰🇷','Sweden':'🇸🇪','Finland':'🇫🇮','Switzerland':'🇨🇭','Ireland':'🇮🇪','Hong Kong':'🇭🇰','Russia':'🇷🇺','UAE':'🇦🇪'};
+  return m[c]||'🌐';
+}
+
+// ── Render: Ports ──────────────────────────────────────────────
+function renderPorts(data){
+  const ports=data.ports||[];
+  const INFO={21:{n:'FTP',d:'File Transfer'},22:{n:'SSH',d:'Secure Shell'},25:{n:'SMTP',d:'Email Send'},80:{n:'HTTP',d:'Web'},110:{n:'POP3',d:'Email'},143:{n:'IMAP',d:'Email'},443:{n:'HTTPS',d:'Secure Web'},465:{n:'SMTPS',d:'Secure SMTP'},993:{n:'IMAPS',d:'Secure IMAP'},995:{n:'POP3S',d:'Secure POP3'},3306:{n:'MySQL',d:'Database'},5432:{n:'PostgreSQL',d:'Database'},8080:{n:'HTTP Alt',d:'Alt Web'}};
+  const open=ports.filter(p=>p.open).length;
+  $('portsContent').innerHTML=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+    <span class="pill ok">${open} open</span>
+    <span class="pill">${ports.length-open} closed</span>
+    <span style="font-size:12px;color:var(--text-muted)">${ports.length} ports scanned on ${esc(data.domain||'')}</span>
+  </div>
+  <div class="ports-grid">
+    ${ports.map(p=>{
+      const i=INFO[p.port]||{n:`Port ${p.port}`,d:''};
+      return `<div class="port-card${p.open?' open':''}">
+        <div class="port-num" style="color:${p.open?'var(--brand)':'rgba(241,245,249,.2)'}">${p.port}</div>
+        <div class="port-name" style="color:${p.open?'var(--text-dim)':'rgba(241,245,249,.25)'}">${esc(i.n)}</div>
+        <div class="port-desc">${esc(i.d)}</div>
+        <div class="port-badge ${p.open?'open':'closed'}">${p.open?'OPEN':'CLOSED'}</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+// ── Stat helpers ───────────────────────────────────────────────
+function sslStat(d){
+  if(d.error){ setStat('sSsl','Error','err'); return; }
+  const days=d.certificate?.daysRemaining;
+  if(days==null){ setStat('sSsl','—',''); return; }   // no parseable certificate
+  const expired=d.certificate?.expired;
+  if(expired||days<0) setStat('sSsl','Invalid','err');
+  else if(days<30) setStat('sSsl',days+'d left','err');
+  else if(days<90) setStat('sSsl',days+'d left','warn');
+  else setStat('sSsl','Valid ✓','ok');
+}
+function blStat(d){
+  if(d.error||!d.results){ setStat('sBl','—',''); return; }
+  d.results.some(r=>r.listed) ? setStat('sBl','Listed ✗','err') : setStat('sBl','Clean ✓','ok');
+}
+
+// ── Score ──────────────────────────────────────────────────────
+// The weighted health score comes from /shared/health-score.js — the SAME module
+// the server uses for the badge and /api/scan, so grades can never drift.
+// This adapter maps client state S into it and adds the ring color + breakdown.
+function computeHealth(){
+  const h = window.HetOpsScore && HetOpsScore.computeHealthScore({
+    dns: S.dns, ssl: S.ssl, emailsec: S.emailsec, blacklist: S.bl,
+  });
+  if(!h) return null;
+  const gc=h.pct>=85?'var(--ok)':h.pct>=70?'#a3e635':h.pct>=50?'var(--warn)':'var(--err)';
+  return {pct:h.pct, grade:h.grade, gc, pts:h.pts, tot:h.tot, breakdown:h.breakdown};
+}
+
+// Count the score ring's number up to its target, synced with the arc animation.
+let scoreRAF=null, scoreTarget=null;
+function animateScore(to){
+  const el=$('scoreNum'); if(!el) return;
+  if(scoreTarget===to) return;
+  scoreTarget=to;
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches){ el.textContent=to; return; }
+  if(scoreRAF) cancelAnimationFrame(scoreRAF);
+  const from=parseInt(el.textContent,10)||0, dur=900, start=performance.now();
+  (function frame(t){
+    const p=Math.min(1,(t-start)/dur), eased=1-Math.pow(1-p,3);
+    el.textContent=Math.round(from+(to-from)*eased);
+    scoreRAF = p<1 ? requestAnimationFrame(frame) : null;
+  })(performance.now());
+}
+
+function score(){
+  // Email-security stat tile (kept here as it has its own fallback display logic).
+  if(S.emailsec&&!S.emailsec.error){
+    const es=S.emailsec.overallScore||0;
+    setStat('sEmail',es+'%',es>=80?'ok':es>=50?'warn':'err');
+  } else if(S.dns?.insights){
+    const c=S.dns.insights.checks;
+    const es=(c.spf?1:0)+(c.dmarc?1:0)+(c.mx?1:0);
+    setStat('sEmail',es===3?'Strong':es>=2?'Fair':'Weak',es===3?'ok':es>=2?'warn':'err');
+  }
+  const h=computeHealth();
+  if(!h) return;
+  const {pct, grade, gc}=h;
+  $('scoreArc').style.strokeDashoffset=232.5-(232.5*pct/100);
+  $('scoreArc').style.stroke=gc;
+  animateScore(pct);
+  $('gradeLetter').textContent=grade;
+  $('gradeLetter').style.color=gc;
+  $('gradeLetter').style.textShadow=`0 0 40px ${gc}77`;
+  const chips=[];
+  if(S.ssl&&!S.ssl.error) chips.push(`<span class="pill accent">${esc(S.ssl.grade?.letter||'TLS')}</span>`);
+  if(S.dns?.results?.NS?.length) chips.push(`<span class="pill">${esc(S.dns.results.NS[0]?.value||'')}</span>`);
+  if(S.geoip?.geo?.country_name) chips.push(`<span class="pill">${cFlag(S.geoip.geo.country_name)} ${esc(S.geoip.geo.country_name)}</span>`);
+  if(S.geoip?.geo?.org) chips.push(`<span class="pill">${esc(S.geoip.geo.org)}</span>`);
+  $('domainChips').innerHTML=chips.join('');
+  renderScorecard();   // progressively populate the scorecard as checks complete
+  renderOverview();
+  renderScoreBreakdown();
+  updateCatCounts();
+}
+
+// ── Score transparency ─────────────────────────────────────────
+// Clicking the score ring/grade toggles a plain "earned/max/why" breakdown so the
+// grade is never a black box. Rows deep-link to the tab holding the evidence.
+let scoreBreakdownOpen=false;
+function toggleScoreBreakdown(){ scoreBreakdownOpen=!scoreBreakdownOpen; renderScoreBreakdown(); }
+function renderScoreBreakdown(){
+  const el=$('scoreBreakdown'); if(!el) return;
+  const h=computeHealth();
+  if(!h || !scoreBreakdownOpen){ el.style.display='none'; return; }
+  const rows=h.breakdown.map(sec=>{
+    const secRows=sec.rows.map(r=>`<div class="sb-row">
+      <span class="sb-ico" style="color:${r.ok?'var(--ok)':'var(--err)'}">${r.ok?'✓':'✗'}</span>
+      <span class="sb-lbl">${esc(r.label)}</span>
+      <button class="sb-pts" onclick="deepLinkTab('${esc(r.tab)}')" title="View details">${r.pts}/${r.max}</button>
+    </div>`).join('');
+    return `<div class="sb-sec">
+      <div class="sb-sec-head"><span>${esc(sec.label)}</span><span class="sb-sec-pts">${sec.earned}/${sec.max}</span></div>
+      ${secRows}
+    </div>`;
+  }).join('');
+  el.innerHTML=`<div class="sb-head">
+      <span>How the grade is calculated</span>
+      <span class="sb-total">${h.pts} of ${h.tot} points → ${h.pct}/100 (${h.grade})</span>
+    </div>
+    ${rows}
+    <div class="sb-foot">Score covers DNS, email, TLS and blacklist. Every other check appears as a finding in the scorecard above.</div>`;
+  el.style.display='';
+}
+
+// ── Overview landing ────────────────────────────────────────────
+// A plain-language verdict + one line per category, so the first thing a user
+// sees is "what's wrong and where", not raw DNS records.
+const CAT_LABEL={ core:'Core / DNS', security:'Security', email:'Email', network:'Network', web:'Web', intelligence:'Intelligence' };
+function catIssueCounts(){
+  const counts={}; Object.keys(CAT_LABEL).forEach(c=>counts[c]={crit:0,high:0,med:0,low:0,good:0});
+  collectFindings().forEach(x=>{ const cat=TAB_CAT[x.tab]; if(cat&&counts[cat]) counts[cat][x.sev]++; });
+  return counts;
+}
+function updateCatCounts(){
+  const c=catIssueCounts();
+  Object.keys(CAT_LABEL).forEach(cat=>{
+    const el=$('count-'+cat); if(!el) return;
+    const issues=c[cat].crit+c[cat].high+c[cat].med+c[cat].low;
+    el.textContent=issues>0?issues:'✓';
+    el.className='cat-count'+(issues>0?' has-issues':' clean');
+  });
+}
+function renderOverview(){
+  const el=$('overviewContent'); if(!el) return;
+  const h=computeHealth();
+  const findings=collectFindings();
+  const issues=findings.filter(x=>x.sev!=='good');
+  const crit=issues.filter(x=>x.sev==='crit').length, high=issues.filter(x=>x.sev==='high').length;
+  const domain=$('currentDomain')?.textContent||'this domain';
+
+  // One-sentence verdict from the worst signals.
+  let verdict, vClass;
+  if(!h){ verdict=analyzing?'Analyzing…':'Not enough data yet.'; vClass='muted'; }
+  else if(crit){ verdict=`${domain} needs attention: ${crit} critical issue${crit!==1?'s':''} could cause an outage or breach.`; vClass='err'; }
+  else if(high){ verdict=`${domain} is mostly healthy, but ${high} high-priority issue${high!==1?'s':''} should be fixed.`; vClass='warn'; }
+  else if(issues.length){ verdict=`${domain} looks solid — only ${issues.length} minor improvement${issues.length!==1?'s':''} suggested.`; vClass='ok'; }
+  else { verdict=`${domain} passed every check with no issues found.`; vClass='ok'; }
+
+  const counts=catIssueCounts();
+  const cats=Object.keys(CAT_LABEL).map(cat=>{
+    const cc=counts[cat];
+    const issueN=cc.crit+cc.high+cc.med+cc.low;
+    const worst=cc.crit?'crit':cc.high?'high':cc.med?'med':cc.low?'low':'good';
+    const dotCls=worst==='crit'||worst==='high'?'err':worst==='med'||worst==='low'?'warn':'ok';
+    const summary=issueN?`${issueN} issue${issueN!==1?'s':''} to review`:'No issues found';
+    return `<button class="ov-cat" onclick="selectCat('${cat}')">
+      <span class="ov-cat-dot ${dotCls}"></span>
+      <span class="ov-cat-name">${esc(CAT_LABEL[cat])}</span>
+      <span class="ov-cat-sum">${summary}</span>
+      <span class="ov-cat-arrow">→</span>
+    </button>`;
+  }).join('');
+
+  const gradeBox=h?`<div class="ov-grade" onclick="toggleScoreBreakdown()" role="button" tabindex="0"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleScoreBreakdown();}"
+      title="Click for the score breakdown">
+      <div class="ov-grade-letter" style="color:${h.gc}">${h.grade}</div>
+      <div class="ov-grade-pct">${h.pct}<span>/100</span></div>
+      <div class="ov-grade-hint">how is this calculated?</div>
+    </div>`:'';
+
+  el.innerHTML=`<div class="card ov-card">
+    <div class="ov-top">
+      ${gradeBox}
+      <div class="ov-verdict ${vClass}">${esc(verdict)}</div>
+    </div>
+    <div class="ov-cats">${cats}</div>
+  </div>`;
+}
+
+// ── Security Scorecard ─────────────────────────────────────────
+// Aggregate the most important signals across all checks into prioritized,
+// actionable findings. Each finding is defensive — only emitted when its source
+// data is present and not an error, so partial results never break the summary.
+const SEV_RANK = { crit:0, high:1, med:2, low:3, good:4 };
+
+// Per-finding remediation metadata: which tab holds the evidence, a plain-language
+// fix, and (where a DNS record / header solves it) a copy-ready snippet.
+const FINDING_META = {
+  'ssl-expired':      { tab:'ssl', fix:'Renew the certificate with your CA or ACME client (e.g. certbot renew) and reload the web server.' },
+  'ssl-expiring':     { tab:'ssl', fix:'Renew before expiry — or better, set up automatic renewal (Let’s Encrypt renews at 30 days remaining).' },
+  'ssl-sha1':         { tab:'ssl', fix:'Reissue the certificate — every modern CA signs with SHA-256 by default.' },
+  'ssl-sslv3':        { tab:'ssl', fix:'Disable SSLv3 in the server TLS config (it has been obsolete since 2015).' },
+  'ssl-legacy-tls':   { tab:'ssl', fix:'Set the minimum TLS version to 1.2 in your server/CDN configuration.' },
+  'ssl-no-tls13':     { tab:'ssl', fix:'Enable TLS 1.3 — supported by all maintained servers (nginx ≥1.13, OpenSSL ≥1.1.1).' },
+  'ssl-vuln':         { tab:'ssl', fix:'Update the TLS library / server and disable the affected protocol or cipher.' },
+  'ssl-good':         { tab:'ssl' },
+  'spf-missing':      { tab:'emailsec', fix:'Publish a TXT record naming the servers allowed to send your mail, ending in -all.',
+                        snippet:d=>`${d}. TXT "v=spf1 include:<your-mail-provider> -all"` },
+  'dmarc-missing':    { tab:'emailsec', fix:'Publish a DMARC policy TXT record at _dmarc — start with p=quarantine and an aggregate-report address.',
+                        snippet:d=>`_dmarc.${d}. TXT "v=DMARC1; p=quarantine; rua=mailto:dmarc@${d}"` },
+  'dmarc-none':       { tab:'emailsec', fix:'Change p=none to p=quarantine (then p=reject once reports look clean).',
+                        snippet:d=>`_dmarc.${d}. TXT "v=DMARC1; p=quarantine; rua=mailto:dmarc@${d}"` },
+  'dmarc-pct':        { tab:'emailsec', fix:'Raise pct to 100 so the policy protects all mail.' },
+  'dkim-missing':     { tab:'emailsec', fix:'Enable DKIM signing at your mail provider and publish the public key they give you at <selector>._domainkey.' },
+  'email-good':       { tab:'emailsec' },
+  'bl-listed':        { tab:'security', fix:'Visit each blacklist’s delisting page and request removal; find and stop the source of spam first.' },
+  'bl-clean':         { tab:'security' },
+  'dnssec-off':       { tab:'dnssec', fix:'Enable DNSSEC at your DNS host (usually one click), then publish the DS record at your registrar.' },
+  'dnssec-incomplete':{ tab:'dnssec', fix:'Publish the DS record at your registrar to complete the chain of trust.' },
+  'dnssec-good':      { tab:'dnssec' },
+  'dnssecchain-broken':{ tab:'dnssec-chain', fix:'Re-sync the DS record at the parent with your current DNSKEY (re-publish after key rollovers).' },
+  'takeover-found':   { tab:'takeover', fix:'Delete the dangling CNAME record, or re-claim the service it points to.' },
+  'takeover-clean':   { tab:'takeover' },
+  'ports-risky':      { tab:'ports', fix:'Firewall these ports to trusted IPs only (or bind the services to localhost/VPN).' },
+  'ports-good':       { tab:'ports' },
+  'headers-missing':  { tab:'headers', fix:'Add the header in your web server or CDN configuration.' },
+  'headers-hsts':     { tab:'headers', fix:'Add the Strict-Transport-Security header so browsers always use HTTPS.',
+                        snippet:()=>`Strict-Transport-Security: max-age=31536000; includeSubDomains` },
+  'headers-good':     { tab:'headers' },
+  'hsts-preload':     { tab:'hsts', fix:'Submit the domain at hstspreload.org — it already meets the requirements.' },
+  'whois-expiring':   { tab:'whois', fix:'Renew the domain at your registrar and turn on auto-renew.' },
+  'whois-good':       { tab:'whois' },
+  'prop-inconsistent':{ tab:'propagation', fix:'If you changed DNS recently, wait for TTLs to expire; otherwise verify records at your DNS host.' },
+  'prop-good':        { tab:'propagation' },
+  'mx-none':          { tab:'mx', fix:'If this domain should receive email, add MX records at your DNS host. If not, this is fine.' },
+  'mx-single':        { tab:'mx', fix:'Add a second MX record with a higher priority number as backup.' },
+  'mx-nostarttls':    { tab:'mx', fix:'Enable STARTTLS on the mail server so inbound mail is encrypted in transit.' },
+  'mx-good':          { tab:'mx' },
+  'mtasts-missing':   { tab:'mtasts', fix:'Publish an _mta-sts TXT record plus the policy file at https://mta-sts.<domain>/.well-known/mta-sts.txt.',
+                        snippet:d=>`_mta-sts.${d}. TXT "v=STSv1; id=${new Date().toISOString().slice(0,10).replace(/-/g,'')}01"` },
+  'mtasts-testing':   { tab:'mtasts', fix:'Switch the policy file from mode: testing to mode: enforce once delivery reports look clean.' },
+  'mtasts-good':      { tab:'mtasts' },
+  'ocsp-nostapling':  { tab:'ocsp', fix:'Enable OCSP stapling in the web server (nginx: ssl_stapling on; — apache: SSLUseStapling on).' },
+  'ocsp-good':        { tab:'ocsp' },
+  'redirect-nohttps': { tab:'redirect', fix:'Add a permanent (301) redirect from http:// to https:// for every request.' },
+  'redirect-long':    { tab:'redirect', fix:'Collapse the chain — redirect straight to the final URL in one hop.' },
+  'redirect-good':    { tab:'redirect' },
+  'csp-missing':      { tab:'csp', fix:'Start with a report-only policy, review the reports, then enforce.',
+                        snippet:()=>`Content-Security-Policy: default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'` },
+  'csp-unsafe':       { tab:'csp', fix:'Replace unsafe-inline/unsafe-eval with nonces or hashes (add strict-dynamic for modern browsers).' },
+  'csp-good':         { tab:'csp' },
+  'cors-wide':        { tab:'cors', fix:'Never combine a wildcard origin with credentials — echo specific trusted origins instead.' },
+  'ipv6-missing':     { tab:'ipv6', fix:'Add an AAAA record pointing at your server’s IPv6 address (most CDNs enable this with one toggle).' },
+  'ipv6-good':        { tab:'ipv6' },
+  'trace-unreachable':{ tab:'trace', fix:'Check that the server is up and that A/AAAA records point to the right address.' },
+  'caa-missing':      { tab:'dns', fix:'Add a CAA record naming the only CA allowed to issue certificates for this domain.',
+                        snippet:d=>`${d}. CAA 0 issue "letsencrypt.org"` },
+  'dns-good':         { tab:'dns' },
+  'typosquat-found':  { tab:'typosquat', fix:'Review who registered them; consider defensive registration of high-risk variants and takedown requests for active phishing.' },
+  'typosquat-clean':  { tab:'typosquat' },
+  'http-good':        { tab:'http' },
+};
+
+function collectFindings(){
+  const f=[];
+  const add=(id,sev,title,detail)=>{
+    const meta=FINDING_META[id]||FINDING_META[id.replace(/:.*$/,'')]||{};
+    f.push({id,sev,title,detail,tab:meta.tab,fix:meta.fix,snippet:meta.snippet});
+  };
+
+  // ── SSL / TLS ──
+  if(S.ssl && !S.ssl.error){
+    const cert=S.ssl.certificate||{};
+    const days=cert.daysRemaining;
+    if(cert.expired || days<0) add('ssl-expired','crit','SSL certificate has expired','Browsers will block the site until the certificate is renewed.');
+    else if(days!=null && days<15) add('ssl-expiring','crit',`Certificate expires in ${days} day${days!==1?'s':''}`,'Renew immediately to avoid an outage.');
+    else if(days!=null && days<30) add('ssl-expiring','high',`Certificate expires in ${days} days`,'Schedule renewal soon.');
+    if(cert.sha1Signed) add('ssl-sha1','high','Certificate signed with SHA-1','SHA-1 is deprecated and considered insecure — reissue with SHA-256.');
+    const prot=S.ssl.protocols||{};
+    if(prot.sslv3) add('ssl-sslv3','crit','SSL 3.0 is enabled','Obsolete and vulnerable (POODLE) — disable it.');
+    if(prot.tls10 || prot.tls11) add('ssl-legacy-tls','med',`Legacy TLS ${prot.tls10?'1.0':'1.1'} enabled`,'Disable TLS 1.0/1.1; require TLS 1.2 or higher.');
+    if(!prot.tls13 && prot.tls12!=null) add('ssl-no-tls13','low','TLS 1.3 not supported','Enable TLS 1.3 for better performance and security.');
+    const vuln=S.ssl.vulnerabilities||{};
+    Object.entries(vuln).filter(([,v])=>v&&v.vulnerable).forEach(([k,v])=>
+      add(`ssl-vuln:${k}`,'high',`TLS vulnerable to ${k}`, v.details||'Known TLS weakness detected.'));
+    const letter=S.ssl.grade?.letter;
+    if((letter==='A+'||letter==='A') && days>30 && !cert.sha1Signed)
+      add('ssl-good','good',`Strong TLS configuration (grade ${letter})`,`Valid certificate, ${days} days remaining.`);
+  }
+
+  // ── Email authentication ──
+  if(S.emailsec && !S.emailsec.error){
+    const spf=S.emailsec.spf||{}, dmarc=S.emailsec.dmarc||{}, dkim=S.emailsec.dkim||{};
+    if(!spf.present) add('spf-missing','high','No SPF record','Without SPF, attackers can more easily spoof your domain in email.');
+    if(!dmarc.present) add('dmarc-missing','high','No DMARC record','DMARC tells receivers how to handle spoofed mail — publish a policy.');
+    else if(dmarc.policy==='none') add('dmarc-none','med','DMARC policy is "none"','Move to quarantine or reject to actually block spoofed mail.');
+    else if(dmarc.pct!=null && dmarc.pct<100) add('dmarc-pct','low',`DMARC applies to only ${dmarc.pct}% of mail`,'Raise pct to 100 once confident.');
+    if(!dkim.present) add('dkim-missing','med','No DKIM signature detected','DKIM lets receivers verify message integrity.');
+    if(spf.present && dmarc.present && (dmarc.policy==='reject'||dmarc.policy==='quarantine') && dkim.present)
+      add('email-good','good','Email authentication fully configured','SPF, DKIM and an enforcing DMARC policy are all in place.');
+  } else if(S.dns?.insights?.checks){
+    const c=S.dns.insights.checks;
+    if(!c.spf) add('spf-missing','high','No SPF record','Publish an SPF record to reduce email spoofing.');
+    if(!c.dmarc) add('dmarc-missing','high','No DMARC record','Publish a DMARC policy to control spoofed mail.');
+  }
+
+  // ── Blacklist ──
+  if(S.bl?.results){
+    const listed=S.bl.results.filter(r=>r.listed);
+    if(listed.length) add('bl-listed','crit',`Listed on ${listed.length} blacklist${listed.length!==1?'s':''}`,'Being blacklisted harms email deliverability and reputation — request delisting.');
+    else add('bl-clean','good','Not on any monitored blacklist','Clean reputation across checked DNSBLs.');
+  }
+
+  // ── DNS hygiene ──
+  if(S.dns?.insights?.checks){
+    const c=S.dns.insights.checks;
+    if(!c.caa) add('caa-missing','low','No CAA record','Any certificate authority can currently issue certificates for this domain.');
+    if(!c.mx) add('mx-none','low','No MX records','This domain cannot receive email — fine if that is intentional.');
+    const recs=S.dns.summary?.totalRecords ?? S.dns.totals?.records;
+    if(recs>0 && c.caa) add('dns-good','good','DNS hygiene looks solid',`${recs} records resolved; CAA restricts certificate issuance.`);
+  }
+
+  // ── WHOIS / registration expiry ──
+  if(S.whois && !S.whois.error && S.whois.rawData){
+    const days = S.whois.expiresAt
+      ? Math.floor((Date.parse(S.whois.expiresAt)-Date.now())/864e5)
+      : whoisExpiryDays(S.whois.rawData);
+    if(days!=null){
+      if(days<=0) add('whois-expiring','crit','Domain registration has EXPIRED','The domain can be deleted or claimed by someone else — renew immediately.');
+      else if(days<30) add('whois-expiring','crit',`Domain registration expires in ${days} day${days!==1?'s':''}`,'Losing the registration means losing the domain — renew now.');
+      else if(days<90) add('whois-expiring','high',`Domain registration expires in ${days} days`,'Renew soon or enable auto-renew at your registrar.');
+      else add('whois-good','good','Domain registration healthy',`${days} days until registration expiry.`);
+    }
+  }
+
+  // ── DNSSEC ──
+  if(S.dnssec && !S.dnssec.error){
+    if(S.dnssec.rating==='not_configured') add('dnssec-off','med','DNSSEC not enabled','DNSSEC protects against DNS spoofing and cache poisoning.');
+    else if(S.dnssec.rating==='incomplete') add('dnssec-incomplete','low','DNSSEC signed but chain incomplete','DNSKEY present but no DS record at the parent — complete the chain of trust.');
+    else if(S.dnssec.rating==='good') add('dnssec-good','good','DNSSEC properly configured','Full chain of trust validated.');
+  }
+  if(S.dnssecChain && !S.dnssecChain.error && S.dnssecChain.status==='partial')
+    add('dnssecchain-broken','high','DNSSEC chain has validation issues',(S.dnssecChain.issues||[]).slice(0,2).join(' · ')||'Signed, but the chain of trust does not fully validate.');
+
+  // ── Subdomain takeover ──
+  if(S.takeover && !S.takeover.error){
+    const v=S.takeover.vulnerabilities||[];
+    if(v.length) add('takeover-found','crit',`${v.length} possible subdomain takeover${v.length!==1?'s':''}`,'Dangling CNAMEs point to unclaimed services — remove or reclaim them.');
+    else add('takeover-clean','good','No subdomain takeover risks found',
+      (S.takeover.results||[]).length ? `All ${S.takeover.results.length} third-party CNAMEs appear safe.` : 'No CNAMEs pointing at third-party services.');
+  }
+
+  // ── Open ports ──
+  if(S.ports?.ports){
+    const RISKY={21:'FTP',23:'Telnet',3306:'MySQL',5432:'PostgreSQL',3389:'RDP'};
+    const exposed=S.ports.ports.filter(p=>p.open && RISKY[p.port]).map(p=>`${RISKY[p.port]} (${p.port})`);
+    if(exposed.length) add('ports-risky','med',`Sensitive service${exposed.length!==1?'s':''} exposed`,`Publicly reachable: ${exposed.join(', ')}. Restrict with a firewall.`);
+    else add('ports-good','good','No sensitive ports exposed','No database, FTP, Telnet or RDP ports reachable from the internet.');
+  }
+
+  // ── Security headers ──
+  if(S.headers && !S.headers.error && S.headers.analysis?.checks){
+    const checks=S.headers.analysis.checks;
+    Object.entries(checks).forEach(([name,c])=>{
+      if(name==='Content-Security-Policy') return; // covered in depth by the CSP tab
+      if(c.deprecated && !c.passed) add('headers-missing','low',`Deprecated header: ${name}`,'Remove it — it can introduce vulnerabilities in older browsers.');
+      else if(!c.passed){
+        if(name==='Strict-Transport-Security') add('headers-hsts','med','Missing HSTS header','Browsers can still be tricked into plain-HTTP connections (SSL stripping).');
+        else add(`headers-missing:${name}`,'low',`Missing header: ${name}`, c.detail && c.detail!=='missing' ? c.detail : 'A one-line, free protection worth adding.');
+      }
+    });
+    if((S.headers.analysis.score||0)>=80) add('headers-good','good',`Strong security headers (${S.headers.analysis.score}/100)`,'The important browser protections are in place.');
+  }
+  if(S.hsts && !S.hsts.error && S.hsts.preloaded===false && S.hsts.eligible)
+    add('hsts-preload','low','Not on the HSTS preload list','Eligible for preload — submit to harden against SSL-stripping.');
+
+  // ── Propagation ──
+  if(S.prop && !S.prop.error && Array.isArray(S.prop.results)){
+    const vals=S.prop.results.filter(r=>r.status==='ok'&&(r.records||[]).length>0).map(r=>(r.records||[]).map(x=>x.value).sort().join(','));
+    if(vals.length>=2 && new Set(vals).size>1) add('prop-inconsistent','med','DNS answers differ between resolvers','Some visitors may reach a different server — recent change still propagating, or a misconfiguration.');
+    else if(vals.length>=2) add('prop-good','good','DNS consistent worldwide',`${vals.length} global resolvers agree.`);
+  }
+
+  // ── MX / SMTP ──
+  if(S.mx && !S.mx.error && Array.isArray(S.mx.mxServers) && S.mx.mxServers.length){
+    const servers=S.mx.mxServers;
+    const noTls=servers.filter(s=>s.smtp && s.smtp.starttls===false);
+    if(noTls.length) add('mx-nostarttls','med',`${noTls.length} mail server${noTls.length!==1?'s':''} without STARTTLS`,'Inbound mail to these servers can be read in transit.');
+    if(servers.length===1) add('mx-single','low','Single mail server','One MX record — mail bounces if that server goes down.');
+    if(servers.length>=2 && !noTls.length) add('mx-good','good','Mail infrastructure redundant and encrypted',`${servers.length} MX servers, all supporting STARTTLS.`);
+  }
+
+  // ── MTA-STS / DANE ──
+  if(S.mtasts && !S.mtasts.error && S.dns?.insights?.checks?.mx){
+    const m=S.mtasts.mtaSts||{};
+    if(!m.present) add('mtasts-missing','low','No MTA-STS policy','Encryption of mail delivered to you can be silently stripped by an attacker in the middle.');
+    else if(m.policy && m.policy.mode!=='enforce') add('mtasts-testing','low',`MTA-STS in "${m.policy.mode}" mode`,'The policy exists but is not enforced yet.');
+    else if(m.present) add('mtasts-good','good','MTA-STS enforced','Mail servers must deliver to you over verified TLS.');
+  }
+
+  // ── OCSP ──
+  if(S.ocsp && !S.ocsp.error){
+    if(S.ocsp.stapling && S.ocsp.stapling.supported===false && S.ocsp.ocsp?.supported)
+      add('ocsp-nostapling','low','OCSP stapling not enabled','Revocation checks are slower and leak visitor info to the CA.');
+    else if(S.ocsp.stapling?.supported) add('ocsp-good','good','OCSP stapling enabled','Fast, private certificate revocation checking.');
+  }
+
+  // ── Redirect chain ──
+  if(S.redirect && !S.redirect.error && Array.isArray(S.redirect.chain) && S.redirect.chain.length){
+    const chain=S.redirect.chain;
+    const last=chain[chain.length-1];
+    const finalUrl=(last.redirectTo||last.url||'');
+    if(finalUrl.startsWith('http://')) add('redirect-nohttps','high','Site not redirecting to HTTPS','Visitors typing the bare domain stay on unencrypted HTTP.');
+    else if(chain.length>4) add('redirect-long','low',`Redirect chain has ${chain.length} hops`,'Each hop adds latency to every first visit.');
+    else if(finalUrl.startsWith('https://')) add('redirect-good','good','Redirects cleanly to HTTPS',`${chain.length} hop${chain.length!==1?'s':''} to the final secure URL.`);
+  }
+
+  // ── CSP ──
+  if(S.csp && !S.csp.error){
+    if(!S.csp.present) add('csp-missing','med','No Content-Security-Policy','The primary browser defence against XSS is absent.');
+    else {
+      const unsafe=(S.csp.issues||[]).filter(i=>/unsafe-(inline|eval)/i.test(i));
+      if(unsafe.length) add('csp-unsafe','med','CSP allows unsafe-inline / unsafe-eval','These directives largely defeat the purpose of CSP.');
+      else if((S.csp.score||0)>=80) add('csp-good','good',`Strong CSP (grade ${S.csp.grade||'A'})`,'Well-restricted content sources.');
+    }
+  }
+
+  // ── CORS ──
+  if(S.cors && !S.cors.error && S.cors.cors?.enabled){
+    const c=S.cors.cors;
+    if(c.origin==='*' && c.credentials) add('cors-wide','high','CORS wildcard with credentials','Any website can read authenticated responses from this origin.');
+  }
+
+  // ── IPv6 ──
+  if(S.ipv6 && !S.ipv6.error){
+    if(!(S.ipv6.ipv6||[]).length) add('ipv6-missing','low','No IPv6 (AAAA) address','IPv6-first networks reach this site via slower translation layers.');
+    else if(S.ipv6.dualStack) add('ipv6-good','good','Dual-stack IPv4 + IPv6','Reachable natively on both address families.');
+  }
+
+  // ── Reachability ──
+  if(S.trace && !S.trace.error && S.trace.hasIPv4===false && S.trace.hasIPv6===false)
+    add('trace-unreachable','high','Host does not resolve to any address','No A or AAAA records answered — the site is unreachable.');
+
+  // ── HTTP features ──
+  if(S.http && !S.http.error && (S.http.score||0)>=80)
+    add('http-good','good',`Modern HTTP setup (${S.http.score}/100)`,'HTTP/2+, compression and key headers in place.');
+
+  // ── Typosquatting ──
+  if(S.typosquat?.results){
+    const reg=S.typosquat.results.filter(r=>r.registered).length;
+    if(reg>0) add('typosquat-found','low',`${reg} look-alike domain${reg!==1?'s':''} registered`,'Potential typosquats are registered — monitor for phishing/brand abuse.');
+    else add('typosquat-clean','good','No typosquats registered',`${S.typosquat.total||S.typosquat.results.length} look-alike variants checked — none registered.`);
+  }
+
+  f.sort((a,b)=>SEV_RANK[a.sev]-SEV_RANK[b.sev]);
+  return f;
+}
+
+const SEV_LABEL = { crit:'Critical', high:'High', med:'Medium', low:'Low', good:'Pass' };
+// One finding row (used for both the issue list and the collapsed passed list).
+function scItem(x){
+  const domain=$('currentDomain')?.textContent||'';
+  const snippet=x.snippet?x.snippet(domain):null;
+  return `<div class="sc-item ${x.sev}">
+    <span class="sc-sev ${x.sev}">${SEV_LABEL[x.sev]}</span>
+    <div class="sc-body">
+      <div class="sc-item-title">${esc(x.title)}</div>
+      <div class="sc-item-detail">${esc(x.detail)}</div>
+      ${x.fix && x.sev!=='good'?`<div class="sc-item-fix"><span class="sc-fix-lbl">Fix:</span> ${esc(x.fix)}</div>`:''}
+    </div>
+    <div class="sc-item-actions">
+      ${snippet?`<button class="sc-view" data-copy="${escAttr(snippet)}" onclick="cpEl(this)" title="Copy a ready-to-paste record/header">Copy fix</button>`:''}
+      ${x.tab?`<button class="sc-view" onclick="deepLinkTab('${esc(x.tab)}')">View →</button>`:''}
+    </div>
+  </div>`;
+}
+function renderScorecard(){
+  const el=$('scorecard'); if(!el) return;
+  const findings=collectFindings();
+  if(!findings.length){
+    if(analyzing){
+      // Slim, unobtrusive bar while scoring, so the record panels below stay visible.
+      el.style.display='';
+      el.className='card scorecard sc-loading';
+      el.innerHTML=`<span class="load-spinner" style="width:15px;height:15px;border-width:2px"></span>
+        <span><b>Security scorecard</b> — calculating score, your records are loading below…</span>`;
+    } else { el.style.display='none'; }
+    return;
+  }
+  el.className='card scorecard';
+  const h=computeHealth();
+  const counts={crit:0,high:0,med:0,low:0,good:0};
+  findings.forEach(x=>counts[x.sev]++);
+
+  const countPill=(sev,cls,label)=>counts[sev]
+    ? `<span class="sc-count ${cls}"><span class="dot"></span>${counts[sev]} ${label}</span>` : '';
+
+  const issues=findings.filter(x=>x.sev!=='good');
+  const passed=findings.filter(x=>x.sev==='good');
+
+  // Top 3 actions — the first (most severe) issues, numbered, with their fixes.
+  const top3=issues.slice(0,3);
+  const top3Html=top3.length?`<div class="sc-top3">
+    <div class="sc-top3-title">Top ${top3.length===1?'action':top3.length+' actions'} to improve this domain</div>
+    ${top3.map((x,i)=>{
+      const domain=$('currentDomain')?.textContent||'';
+      const snippet=x.snippet?x.snippet(domain):null;
+      return `<div class="sc-top3-item">
+        <span class="sc-top3-num">${i+1}</span>
+        <div class="sc-body">
+          <div class="sc-item-title">${esc(x.title)}</div>
+          ${x.fix?`<div class="sc-item-fix">${esc(x.fix)}</div>`:''}
+        </div>
+        <div class="sc-item-actions">
+          ${snippet?`<button class="sc-view" data-copy="${escAttr(snippet)}" onclick="cpEl(this)">Copy fix</button>`:''}
+          ${x.tab?`<button class="sc-view" onclick="deepLinkTab('${esc(x.tab)}')">View →</button>`:''}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`:'';
+
+  const issueList=issues.length>3?`<div class="sc-list">${issues.slice(3).map(scItem).join('')}</div>`:'';
+  const passedHtml=passed.length?`<details class="sc-passed">
+    <summary>${passed.length} check${passed.length!==1?'s':''} passed</summary>
+    <div class="sc-list">${passed.map(scItem).join('')}</div>
+  </details>`:'';
+
+  const allClear=!issues.length && !analyzing
+    ? `<div class="sc-allclear">All clear — no issues found across ${findings.length} evaluated checks.</div>`:'';
+
+  const gradeTxt=h?`${h.grade} · ${h.pct}/100`:'—';
+  el.innerHTML=`
+    <div class="sc-head">
+      <div class="sc-title"><i data-lucide="clipboard-check"></i>Security Scorecard</div>
+      <div class="sc-counts">
+        ${countPill('crit','crit','Critical')}
+        ${countPill('high','high','High')}
+        ${countPill('med','med','Medium')}
+        ${countPill('low','low','Low')}
+        ${countPill('good','good','Passed')}
+      </div>
+    </div>
+    ${analyzing?`<div class="sc-scanning"><span class="load-spinner" style="width:14px;height:14px;border-width:2px"></span>Still analyzing — more findings may appear…</div>`:''}
+    ${allClear}
+    ${top3Html}
+    ${issueList}
+    ${passedHtml}
+    <div class="sc-badge-row">
+      <span class="sc-badge-lbl">Grade: <strong style="color:${h?h.gc:'var(--text)'}">${gradeTxt}</strong></span>
+      <button class="sc-view" onclick="copyBadge()" title="Copy a Markdown status badge for your README">Copy badge</button>
+      <button class="sc-view" onclick="shareLink()">Copy report link</button>
+    </div>`;
+  el.style.display='';
+  if(window.lucide) lucide.createIcons({ root: el });
+}
+
+// Copy a Markdown badge (shields-style) that links back to the live report.
+function copyBadge(){
+  const domain=$('currentDomain').textContent||'';
+  if(!domain){ toast('Run an analysis first','warn'); return; }
+  // Use our own live badge endpoint so the grade stays current wherever it's embedded.
+  const origin=window.location.origin;
+  const badge=`${origin}/api/badge/${encodeURIComponent(domain)}.svg`;
+  const link=`${origin}/?domain=${encodeURIComponent(domain)}`;
+  const md=`[![DNSentinel](${badge})](${link})`;
+  navigator.clipboard.writeText(md)
+    .then(()=>toast('Live Markdown badge copied to clipboard','ok'))
+    .catch(()=>toast('Could not copy badge','err'));
+}
+
+// ── Scan snapshots, history & comparison ───────────────────────
+const SNAP_KEY='hetops_dns_snaps';
+function getSnaps(){ try{ return JSON.parse(localStorage.getItem(SNAP_KEY)||'[]'); }catch(e){ return []; } }
+function buildSnapshot(domain){
+  const h=computeHealth();
+  const sev={crit:0,high:0,med:0,low:0};
+  collectFindings().forEach(x=>{ if(sev[x.sev]!=null) sev[x.sev]++; });
+  const ok=v=>v&&!v.error;
+  return {
+    domain, ts: Date.now(),
+    pct: h?h.pct:null, grade: h?h.grade:null,
+    sslGrade: ok(S.ssl)?(S.ssl.grade?.letter||null):null,
+    sslDays: ok(S.ssl)?(S.ssl.certificate?.daysRemaining??null):null,
+    emailScore: ok(S.emailsec)?(S.emailsec.overallScore??null):null,
+    dmarc: ok(S.emailsec)?(S.emailsec.dmarc?.policy||(S.emailsec.dmarc?.present?'set':'none')):null,
+    dnssec: ok(S.dnssec)?(S.dnssec.rating||null):null,
+    blacklisted: S.bl?.results? S.bl.results.some(r=>r.listed):null,
+    dnsRecords: S.dns?.summary?.totalRecords ?? S.dns?.totals?.records ?? null,
+    ip: S.geoip?.target||null,
+    country: S.geoip?.geo?.country_name||null,
+    crit: sev.crit, high: sev.high, med: sev.med, low: sev.low,
+  };
+}
+// Persist a snapshot for the just-finished scan. Returns the previous snapshot for
+// the same domain (if any) so callers can surface what changed since last time.
+function saveSnapshot(domain){
+  const snap=buildSnapshot(domain);
+  if(snap.pct==null && snap.sslGrade==null && snap.dnsRecords==null) return null; // no real data
+  const snaps=getSnaps();
+  const prev=snaps.find(s=>s.domain===domain) || null;
+  const next=[snap, ...snaps].slice(0,40);
+  try{ localStorage.setItem(SNAP_KEY, JSON.stringify(next)); }catch(e){}
+  syncHistoryToServer(domain, snap);
+  return prev;
+}
+function notifyGradeChange(prev, domain){
+  if(!prev) return;
+  const h=computeHealth(); if(!h) return;
+  if(prev.grade && prev.grade!==h.grade){
+    const better = (prev.pct??0) < h.pct;
+    toast(`${domain}: grade ${better?'improved':'dropped'} ${prev.grade} → ${h.grade} since last scan`, better?'ok':'warn', 4500);
+  } else if(prev.sslDays!=null && h && S.ssl && !S.ssl.error){
+    const now=S.ssl.certificate?.daysRemaining;
+    if(now!=null && prev.sslDays>30 && now<=30) toast(`${domain}: certificate now expires in ${now} days`, 'warn', 4500);
+  }
+}
+function latestPerDomain(){
+  const seen=new Set(), out=[];
+  for(const s of getSnaps()){ if(!seen.has(s.domain)){ seen.add(s.domain); out.push(s); } }
+  return out;
+}
+function relTime(ts){
+  const s=Math.floor((Date.now()-ts)/1000);
+  if(s<60) return 'just now';
+  if(s<3600) return Math.floor(s/60)+'m ago';
+  if(s<86400) return Math.floor(s/3600)+'h ago';
+  return Math.floor(s/86400)+'d ago';
+}
+
+function openCompare(){
+  const ov=$('cmpOverlay');
+  const domains=latestPerDomain();
+  const a=$('cmpA'), b=$('cmpB');
+  const opts=domains.map(s=>`<option value="${esc(s.domain)}">${esc(s.domain)}</option>`).join('');
+  a.innerHTML=opts; b.innerHTML=opts;
+  // Default A = current domain (or newest), B = next distinct domain.
+  const current=$('currentDomain').textContent||'';
+  if(domains.length){
+    a.value = domains.some(s=>s.domain===current)?current:domains[0].domain;
+    const other=domains.find(s=>s.domain!==a.value);
+    if(other) b.value=other.domain;
+  }
+  renderCompare();
+  renderHistory();
+  ov.classList.add('open');
+  if(window.lucide) lucide.createIcons({ root: ov });
+  trapFocus(ov);
+}
+function closeCompare(){ const o=$('cmpOverlay'); if(o.classList.contains('open')){ o.classList.remove('open'); releaseFocus(); } }
+
+const CMP_METRICS=[
+  ['Health score','pct',(v)=>v==null?'—':v+'/100','higher'],
+  ['Grade','grade',(v)=>v||'—','none'],
+  ['Critical issues','crit',(v)=>v==null?'—':String(v),'lower'],
+  ['High issues','high',(v)=>v==null?'—':String(v),'lower'],
+  ['TLS grade','sslGrade',(v)=>v||'—','none'],
+  ['Cert days left','sslDays',(v)=>v==null?'—':v+'d','higher'],
+  ['Email score','emailScore',(v)=>v==null?'—':v+'/100','higher'],
+  ['DMARC policy','dmarc',(v)=>v||'—','none'],
+  ['DNSSEC','dnssec',(v)=>v?({good:'enabled',incomplete:'partial',not_configured:'off'}[v]||v):'—','none'],
+  ['Blacklisted','blacklisted',(v)=>v==null?'—':(v?'yes':'no'),'none'],
+  ['DNS records','dnsRecords',(v)=>v==null?'—':String(v),'higher'],
+  ['Location','country',(v)=>v||'—','none'],
+];
+function renderCompare(){
+  const snaps=latestPerDomain();
+  const A=snaps.find(s=>s.domain===$('cmpA').value);
+  const B=snaps.find(s=>s.domain===$('cmpB').value);
+  const wrap=$('cmpTable');
+  if(!A || !B){ wrap.innerHTML=`<div class="cmp-empty">Run at least two domains to compare them side by side.</div>`; return; }
+  const rows=CMP_METRICS.map(([label,key,fmt,better])=>{
+    const va=A[key], vb=B[key];
+    let ca='val', cb='val';
+    if(better!=='none' && typeof va==='number' && typeof vb==='number' && va!==vb){
+      const aWins = better==='higher' ? va>vb : va<vb;
+      ca='val '+(aWins?'winner':'loser'); cb='val '+(aWins?'loser':'winner');
+    }
+    return `<tr><td class="metric">${esc(label)}</td><td class="${ca}">${esc(fmt(va))}</td><td class="${cb}">${esc(fmt(vb))}</td></tr>`;
+  }).join('');
+  wrap.innerHTML=`<table class="cmp-grid">
+    <thead><tr><th>Metric</th><th>${esc(A.domain)}</th><th>${esc(B.domain)}</th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+}
+function gradeColor(g){
+  if(!g) return 'var(--text-muted)';
+  if(g==='A+'||g==='A') return 'var(--ok)';
+  if(g==='B') return '#a3e635';
+  if(g==='C') return 'var(--warn)';
+  return 'var(--err)';
+}
+// Tiny inline SVG trend line of score over time (0–100).
+function sparkline(values){
+  if(!values || values.length<2) return '<span class="cmp-spark-empty"></span>';
+  const w=72, h=20, n=values.length;
+  const pts=values.map((v,i)=>{
+    const x=(i/(n-1))*w;
+    const y=h-2-((Math.max(0,Math.min(100,v))/100)*(h-4));
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const last=values[values.length-1], first=values[0];
+  const col=last>=first?'var(--ok)':'var(--err)';
+  return `<svg class="cmp-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+function renderHistory(){
+  const all=getSnaps();
+  const wrap=$('cmpHistory');
+  if(!all.length){ wrap.innerHTML=`<div class="cmp-empty">No scans yet — analyze a domain to start building history.</div>`; return; }
+  // Compute per-domain previous to show deltas.
+  const html=all.map((s,i)=>{
+    const prev=all.slice(i+1).find(p=>p.domain===s.domain);
+    let delta='';
+    if(prev && prev.pct!=null && s.pct!=null && prev.pct!==s.pct){
+      const up=s.pct>prev.pct;
+      delta=`<span class="cmp-hist-delta" style="color:${up?'var(--ok)':'var(--err)'}">${up?'▲':'▼'}${Math.abs(s.pct-prev.pct)}</span>`;
+    }
+    // Trend sparkline from this domain's score history (oldest→newest).
+    const series=all.filter(p=>p.domain===s.domain && p.pct!=null).map(p=>p.pct).reverse();
+    return `<div class="cmp-hist-item" onclick="closeCompare();quickSearch('${esc(s.domain)}')">
+      <span class="cmp-hist-grade" style="color:${gradeColor(s.grade)}">${esc(s.grade||'—')}</span>
+      <span class="cmp-hist-domain">${esc(s.domain)}</span>
+      ${sparkline(series)}
+      ${delta}
+      <span class="cmp-hist-meta">${s.pct!=null?s.pct+'/100 · ':''}${relTime(s.ts)}</span>
+    </div>`;
+  }).join('');
+  wrap.innerHTML=`${html}<div style="text-align:right;margin-top:8px"><button class="cmp-clear" onclick="clearSnaps()">Clear history</button></div>`;
+}
+function clearSnaps(){
+  try{ localStorage.removeItem(SNAP_KEY); }catch(e){}
+  renderHistory(); renderCompare();
+  toast('Scan history cleared','info',2000);
+}
+
+// ── Domain monitoring & alerts ─────────────────────────────────
+const WATCH_KEY='hetops_dns_watch';
+function getWatch(){ try{ return JSON.parse(localStorage.getItem(WATCH_KEY)||'[]'); }catch(e){ return []; } }
+function setWatch(w){ try{ localStorage.setItem(WATCH_KEY, JSON.stringify(w)); }catch(e){} }
+function isWatched(domain){ return getWatch().some(w=>w.domain===domain); }
+
+// Snapshot of the monitored signals from the current in-page analysis.
+function currentStatusFromS(){
+  const ok=v=>v&&!v.error;
+  return {
+    ts: Date.now(),
+    sslDays: ok(S.ssl)?(S.ssl.certificate?.daysRemaining??null):null,
+    grade: ok(S.ssl)?(S.ssl.grade?.letter||null):null,
+    blacklisted: S.bl?.results? S.bl.results.some(r=>r.listed):null,
+    whoisDays: ok(S.whois)?whoisExpiryDays(S.whois.rawData):null,
+    aRecords: ok(S.dns)?(((S.dns.results?.A)||[]).map(r=>r.value).sort()):[],
+  };
+}
+
+function toggleWatch(btn){
+  const domain=$('currentDomain').textContent||'';
+  if(!domain){ toast('Run an analysis first','warn'); return; }
+  let w=getWatch();
+  if(isWatched(domain)){
+    w=w.filter(x=>x.domain!==domain); setWatch(w);
+    removeAlertFromServer(domain);
+    syncWatchBtn();
+    toast(`Stopped monitoring ${domain}`,'info',2200);
+  } else {
+    const base=currentStatusFromS();
+    w=[{domain, addedAt:Date.now(), baseline:base, last:base, lastChanges:[], emailEnabled:true}, ...w].slice(0,30);
+    setWatch(w);
+    syncAlertToServer(domain, true);
+    syncWatchBtn();
+    toast(currentUser?`Now monitoring ${domain} — email alerts on`:`Now monitoring ${domain} for changes`,'ok');
+  }
+}
+function syncWatchBtn(){
+  const btn=$('watchBtn'); if(!btn) return;
+  const domain=$('currentDomain').textContent||'';
+  const on=domain && isWatched(domain);
+  btn.classList.toggle('watching', !!on);
+  btn.innerHTML=`<i data-lucide="radar"></i>${on?'Watching':'Watch'}`;
+  if(window.lucide) lucide.createIcons({ root: btn });
+}
+
+// Fetch only the monitored signals for a domain (cached server-side, so cheap).
+async function monCheck(domain){
+  const [ssl,bl,dns,whois]=await Promise.all([
+    fetchJSON('/api/ssl',{domain}).catch(()=>({error:1})),
+    fetchJSON('/api/blacklist-check',{domain}).catch(()=>({error:1})),
+    fetchJSON('/api/dns-lookup',{domain,resolver:'balanced'}).catch(()=>({error:1})),
+    fetchJSON('/api/whois',{domain}).catch(()=>({error:1})),
+  ]);
+  return {
+    ts: Date.now(),
+    sslDays: (ssl&&!ssl.error)?(ssl.certificate?.daysRemaining??null):null,
+    grade: (ssl&&!ssl.error)?(ssl.grade?.letter||null):null,
+    blacklisted: (bl&&!bl.error&&bl.results)?bl.results.some(r=>r.listed):null,
+    whoisDays: (whois&&!whois.error)?whoisExpiryDays(whois.rawData):null,
+    aRecords: (dns&&!dns.error)?(((dns.results?.A)||[]).map(r=>r.value).sort()):[],
+  };
+}
+// Days until domain registration expiry from raw WHOIS text (null if unknown).
+function whoisExpiryDays(raw){
+  const p=parseWhois(raw||'');
+  const v=p['registry expiry date']||p['registrar registration expiration date']||p['expiry date']||p['expiration date'];
+  if(!v) return null;
+  const t=Date.parse(Array.isArray(v)?v[0]:v);
+  return isNaN(t)?null:Math.floor((t-Date.now())/864e5);
+}
+
+// Compare two status snapshots and describe meaningful changes.
+function diffStatus(prev, cur){
+  const ch=[];
+  if(!prev) return ch;
+  if(prev.sslDays!=null && cur.sslDays!=null){
+    for(const t of [7,30,90]) if(prev.sslDays>t && cur.sslDays<=t) ch.push(`Certificate now within ${t} days of expiry (${cur.sslDays}d left)`);
+    if(prev.sslDays>0 && cur.sslDays<=0) ch.push('Certificate has expired');
+  }
+  if(prev.whoisDays!=null && cur.whoisDays!=null){
+    for(const t of [7,30]) if(prev.whoisDays>t && cur.whoisDays<=t) ch.push(`Domain registration expires in ${cur.whoisDays} days`);
+    if(prev.whoisDays>0 && cur.whoisDays<=0) ch.push('Domain registration has EXPIRED');
+  }
+  if(prev.blacklisted===false && cur.blacklisted===true) ch.push('Domain is now blacklisted');
+  if(prev.blacklisted===true && cur.blacklisted===false) ch.push('Domain removed from blacklists');
+  if(prev.aRecords && cur.aRecords){
+    const a=prev.aRecords.join(', '), b=cur.aRecords.join(', ');
+    if(a!==b && (a||b)) ch.push(`A record changed: ${a||'∅'} → ${b||'∅'}`);
+  }
+  if(prev.grade && cur.grade && prev.grade!==cur.grade) ch.push(`TLS grade changed ${prev.grade} → ${cur.grade}`);
+  return ch;
+}
+
+let monPolling=false;
+async function refreshMonitor(silent){
+  const watch=getWatch();
+  if(!watch.length){ renderMonitor(); return; }
+  if(monPolling) return; monPolling=true;
+  const btn=$('monRefresh'); if(btn){ btn.disabled=true; }
+  let totalChanges=0;
+  for(const w of watch){
+    try{
+      const cur=await monCheck(w.domain);
+      const prev=w.last||w.baseline;
+      const changes=diffStatus(prev, cur);
+      w.last=cur; w.lastChanges=changes;
+      if(changes.length){
+        totalChanges+=changes.length;
+        toast(`${w.domain}: ${changes[0]}${changes.length>1?` (+${changes.length-1} more)`:''}`,'warn',6500);
+      }
+    }catch(e){ /* leave previous status in place */ }
+  }
+  setWatch(watch);
+  renderMonitor();
+  if(btn){ btn.disabled=false; }
+  monPolling=false;
+  if(!silent) toast(totalChanges?`${totalChanges} change${totalChanges!==1?'s':''} detected`:'All monitored domains unchanged','ok',2600);
+}
+
+function monStatusLevel(s){
+  if(!s) return 'idle';
+  if(s.blacklisted===true || (s.sslDays!=null && s.sslDays<=7) || (s.whoisDays!=null && s.whoisDays<=7)) return 'err';
+  if((s.sslDays!=null && s.sslDays<=30) || (s.whoisDays!=null && s.whoisDays<=30)) return 'warn';
+  return 'ok';
+}
+function renderMonitor(){
+  const watch=getWatch();
+  const list=$('monList'), sub=$('monSub');
+  if(sub) sub.textContent = watch.length ? `${watch.length} domain${watch.length!==1?'s':''} monitored` : '';
+  if(!list) return;
+  if(!watch.length){
+    list.innerHTML=`<div class="cmp-empty">No domains monitored yet. Analyze a domain and press <b>Watch</b> to track it for certificate expiry, blacklisting and DNS changes.</div>`;
+    return;
+  }
+  list.innerHTML=watch.map(w=>{
+    const s=w.last;
+    const lvl=monStatusLevel(s);
+    const stats=[];
+    if(s){
+      if(s.sslDays!=null) stats.push(`<span class="mon-stat">Cert <b>${s.sslDays}d</b></span>`);
+      if(s.whoisDays!=null) stats.push(`<span class="mon-stat">Domain <b>${s.whoisDays}d</b></span>`);
+      if(s.grade) stats.push(`<span class="mon-stat">TLS <b>${esc(s.grade)}</b></span>`);
+      if(s.blacklisted!=null) stats.push(`<span class="mon-stat">Blacklist <b>${s.blacklisted?'listed':'clean'}</b></span>`);
+      if(s.aRecords&&s.aRecords.length) stats.push(`<span class="mon-stat">A <b>${esc(s.aRecords[0])}${s.aRecords.length>1?` +${s.aRecords.length-1}`:''}</b></span>`);
+    }
+    const changes=(w.lastChanges||[]).map(c=>`<div class="mon-change"><i data-lucide="alert-triangle"></i>${esc(c)}</div>`).join('');
+    const emailToggle = currentUser
+      ? `<label class="mon-email-toggle"><input type="checkbox" ${w.emailEnabled!==false?'checked':''} onchange="setAlertEmail('${esc(w.domain)}',this.checked)">Email me</label>`
+      : '';
+    return `<div class="mon-item">
+      <div class="mon-row1">
+        <span class="mon-dot ${lvl}"></span>
+        <span class="mon-domain">${esc(w.domain)}</span>
+        ${emailToggle}
+        <button class="mon-remove" onclick="unwatch('${esc(w.domain)}')">Remove</button>
+      </div>
+      <div class="mon-stats">${stats.join('')||'<span class="mon-stat">Not checked yet</span>'}</div>
+      ${changes?`<div class="mon-changes">${changes}</div>`:''}
+      <div class="mon-checked">${s?('Last checked '+relTime(s.ts)):'Added '+relTime(w.addedAt)}</div>
+    </div>`;
+  }).join('');
+  if(window.lucide) lucide.createIcons({ root: list });
+}
+function unwatch(domain){
+  setWatch(getWatch().filter(w=>w.domain!==domain));
+  removeAlertFromServer(domain);
+  renderMonitor(); syncWatchBtn();
+  toast(`Stopped monitoring ${domain}`,'info',2000);
+}
+// Toggle email alerts for a watched domain (signed-in users only).
+function setAlertEmail(domain, enabled){
+  const w=getWatch();
+  const item=w.find(x=>x.domain===domain);
+  if(item){ item.emailEnabled=enabled; setWatch(w); }
+  syncAlertToServer(domain, enabled);
+  toast(enabled?`Email alerts on for ${domain}`:`Email alerts off for ${domain}`,'info',2000);
+}
+function openMonitor(){
+  renderMonitor();
+  renderAccountPanel();
+  $('monOverlay').classList.add('open');
+  if(window.lucide) lucide.createIcons({ root: $('monOverlay') });
+  if(getWatch().length) refreshMonitor(true);  // silent freshen on open
+  trapFocus($('monOverlay'));
+}
+function closeMonitor(){ const o=$('monOverlay'); if(o.classList.contains('open')){ o.classList.remove('open'); releaseFocus(); } }
+
+// ── Alert delivery & developer API (signed-in account panel) ───
+async function renderAccountPanel(){
+  const el=$('monAccount'); if(!el) return;
+  if(!currentUser){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='';
+  el.innerHTML=`<div class="mon-acct-loading sc-scanning"><span class="load-spinner" style="width:14px;height:14px;border-width:2px"></span>Loading account settings…</div>`;
+  let settings={}, keys=[];
+  try{
+    [settings, keys]=await Promise.all([
+      fetch('/api/settings').then(r=>r.json()).catch(()=>({})),
+      fetch('/api/keys').then(r=>r.json()).then(d=>d.keys||[]).catch(()=>[]),
+    ]);
+  }catch(e){}
+  const keyRows=keys.length? keys.map(k=>`<div class="acct-key">
+      <code>${esc(k.key.slice(0,10))}…${esc(k.key.slice(-4))}</code>
+      <span class="acct-key-label">${esc(k.label||'')}</span>
+      <button class="mon-remove" onclick="deleteKey('${esc(k.key)}')">Revoke</button>
+    </div>`).join('') : `<div style="font-size:12px;color:var(--text-faint);padding:4px 0">No keys yet.</div>`;
+  el.innerHTML=`
+    <div class="acct-sec">
+      <div class="acct-h">Alert delivery</div>
+      <label class="acct-row"><span>Webhook URL <span class="acct-hint">(Slack / Discord / generic)</span></span>
+        <input id="acctWebhook" class="cmp-select" type="url" placeholder="https://hooks.slack.com/…" value="${escAttr(settings.webhookUrl||'')}" style="cursor:text;font-family:'JetBrains Mono',monospace;font-size:12px">
+      </label>
+      <label class="acct-toggle"><input type="checkbox" id="acctDigest" ${settings.digestEnabled?'checked':''}> Email me a weekly summary of monitored domains</label>
+      <button class="hero-tool-btn" onclick="saveAccountSettings()" style="margin-top:10px"><i data-lucide="save"></i>Save settings</button>
+    </div>
+    <div class="acct-sec">
+      <div class="acct-h">Developer API <a href="/docs" target="_blank" class="acct-docs">Docs ↗</a></div>
+      <div class="acct-keys">${keyRows}</div>
+      <button class="hero-tool-btn" onclick="createKey()" style="margin-top:10px"><i data-lucide="plus"></i>Create API key</button>
+    </div>`;
+  if(window.lucide) lucide.createIcons({ root: el });
+}
+async function saveAccountSettings(){
+  const webhookUrl=$('acctWebhook').value.trim();
+  const digestEnabled=$('acctDigest').checked;
+  try{
+    const r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({webhookUrl,digestEnabled})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Save failed');
+    toast('Settings saved','ok');
+  }catch(e){ toast(e.message||'Could not save settings','err'); }
+}
+async function createKey(){
+  try{
+    const r=await fetch('/api/keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:'API key'})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Failed');
+    if(d.key){ cp(d.key); toast('API key created & copied — store it now','ok',4000); }
+    renderAccountPanel();
+  }catch(e){ toast(e.message||'Could not create key','err'); }
+}
+async function deleteKey(key){
+  try{ await fetch('/api/keys/'+encodeURIComponent(key),{method:'DELETE'}); }catch(e){}
+  renderAccountPanel(); toast('API key revoked','info',2000);
+}
+
+// ── Bulk / multi-domain scan ───────────────────────────────────
+let bulkResults=[];
+function openBulk(){ $('bulkResults').innerHTML=''; $('bulkOverlay').classList.add('open'); if(window.lucide) lucide.createIcons({ root: $('bulkOverlay') }); trapFocus($('bulkOverlay')); }
+function closeBulk(){ const o=$('bulkOverlay'); if(o.classList.contains('open')){ o.classList.remove('open'); releaseFocus(); } }
+
+async function bulkGrade(domain){
+  const [dns,ssl,email,bl]=await Promise.all([
+    fetchJSON('/api/dns-lookup',{domain,resolver:'balanced'}).catch(()=>({error:1})),
+    fetchJSON('/api/ssl',{domain}).catch(()=>({error:1})),
+    fetchJSON('/api/email-security',{domain}).catch(()=>({error:1})),
+    fetchJSON('/api/blacklist-check',{domain}).catch(()=>({error:1})),
+  ]);
+  const h=HetOpsScore.computeHealthScore({dns, ssl, emailsec:email, blacklist:bl});
+  const sslDays=(ssl&&!ssl.error)?(ssl.certificate?.daysRemaining??null):null;
+  const listed=(bl&&!bl.error&&bl.results)?bl.results.some(r=>r.listed):null;
+  return {domain, pct:h?h.pct:null, grade:h?h.grade:'—', sslDays, blacklisted:listed, tls:(ssl&&!ssl.error)?(ssl.grade?.letter||null):null};
+}
+async function runBulk(){
+  const domains=[...new Set($('bulkText').value.split(/[\n,\s]+/).map(d=>norm(d)).filter(Boolean))].slice(0,25);
+  if(!domains.length){ toast('Enter at least one domain','warn'); return; }
+  const btn=$('bulkRun'); btn.disabled=true; btn.textContent='Scanning…';
+  bulkResults=[]; renderBulk(domains,true);
+  let i=0;
+  const worker=async()=>{ while(i<domains.length){ const d=domains[i++]; try{ bulkResults.push(await bulkGrade(d)); }catch(e){ bulkResults.push({domain:d,grade:'—',pct:null}); } renderBulk(domains,true); } };
+  await Promise.all([worker(),worker(),worker()]);   // 3 concurrent
+  renderBulk(domains,false);
+  btn.disabled=false; btn.textContent='Scan domains →';
+  toast(`Scanned ${bulkResults.length} domain${bulkResults.length!==1?'s':''}`,'ok');
+}
+function bulkGradeColor(g){ if(!g||g==='—')return 'var(--text-muted)'; if(g==='A+'||g==='A')return 'var(--ok)'; if(g==='B')return '#a3e635'; if(g==='C')return 'var(--warn)'; return 'var(--err)'; }
+function renderBulk(domains, running){
+  const done=bulkResults.length, total=domains.length;
+  const rows=bulkResults.map(r=>`<tr>
+    <td class="val"><a href="/?domain=${encodeURIComponent(r.domain)}" target="_blank" style="color:var(--accent);text-decoration:none">${esc(r.domain)}</a></td>
+    <td class="val" style="color:${bulkGradeColor(r.grade)};font-weight:700">${esc(r.grade)}${r.pct!=null?` <span style="color:var(--text-faint);font-weight:400">${r.pct}</span>`:''}</td>
+    <td class="val">${r.tls?esc(r.tls):'—'}</td>
+    <td class="val">${r.sslDays!=null?r.sslDays+'d':'—'}</td>
+    <td class="val">${r.blacklisted==null?'—':(r.blacklisted?'<span style="color:var(--err)">listed</span>':'clean')}</td>
+  </tr>`).join('');
+  $('bulkResults').innerHTML=`
+    <div class="cmp-hist-head" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Results ${running?`(${done}/${total})`:`· ${total}`}</span>
+      ${!running&&done?`<button class="cmp-clear" onclick="exportBulkCsv()" style="color:var(--accent)">Export CSV ↓</button>`:''}
+    </div>
+    <table class="cmp-grid"><thead><tr><th>Domain</th><th>Grade</th><th>TLS</th><th>Cert</th><th>Blacklist</th></tr></thead><tbody>${rows}</tbody></table>
+    ${running?`<div class="sc-scanning"><span class="load-spinner" style="width:14px;height:14px;border-width:2px"></span>Scanning…</div>`:''}`;
+}
+function exportBulkCsv(){
+  const head='domain,grade,score,tls_grade,cert_days,blacklisted';
+  const lines=bulkResults.map(r=>[r.domain,r.grade,r.pct??'',r.tls??'',r.sslDays??'',r.blacklisted==null?'':r.blacklisted].join(','));
+  const blob=new Blob([[head,...lines].join('\n')],{type:'text/csv'}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='dnsentinel-bulk-scan.csv'; a.click(); URL.revokeObjectURL(url);
+  toast('CSV exported','ok');
+}
+
+// Auto-poll every 15 minutes while the tab is open (silent — toasts only on change).
+setInterval(()=>{ if(getWatch().length && document.visibilityState==='visible') refreshMonitor(true); }, 15*60*1000);
+
+// ── Accounts (magic-link auth) & server sync ───────────────────
+let currentUser = null;  // { email } when signed in
+
+function renderAccount(){
+  const acct=$('navAcct'); if(!acct) return;
+  const initial=currentUser?(currentUser.email[0]||'?').toUpperCase():'';
+  if(currentUser){
+    acct.innerHTML=`<span class="nav-user">
+      <span class="nav-user-chip"><span class="av">${esc(initial)}</span>${esc(currentUser.email)}</span>
+      <button class="nav-logout" onclick="logout()" title="Sign out"><i data-lucide="log-out"></i></button>
+    </span>`;
+  } else {
+    acct.innerHTML=`<button class="nav-signin" id="navSignin" onclick="openLogin()">Sign in</button>`;
+  }
+  if(window.lucide) lucide.createIcons({ root: acct });
+  // Mirror account state into the mobile nav overlay.
+  const macct=$('mobileAcct');
+  if(macct){
+    macct.innerHTML = currentUser
+      ? `<div class="mobile-acct-user"><span class="av">${esc(initial)}</span>${esc(currentUser.email)}</div>
+         <button class="mobile-acct-logout" onclick="logout();closeMobileNav()">Sign out</button>`
+      : `<button class="nav-signin" onclick="openLogin()"><i data-lucide="log-in"></i>Sign in</button>`;
+    if(window.lucide) lucide.createIcons({ root: macct });
+  }
+  // Reflect auth state in the monitoring note.
+  const note=$('monNote');
+  if(note) note.innerHTML=`<i data-lucide="info"></i>Checks run automatically every 15 minutes while this tab is open. ${currentUser?'Email alerts are sent to <b>'+esc(currentUser.email)+'</b> even when the tab is closed.':'<b>Sign in</b> to receive email alerts even when the tab is closed.'}`;
+  if(note && window.lucide) lucide.createIcons({ root: note });
+}
+
+async function checkAuth(){
+  try{
+    const r=await fetch('/api/auth/me'); const d=await r.json();
+    currentUser = d.authenticated ? { email:d.email } : null;
+  }catch(e){ currentUser=null; }
+  renderAccount();
+  if(currentUser){ await pullServerData(); }
+}
+
+function openMobileNav(){
+  document.getElementById('mobileNavOverlay').classList.add('open');
+  $('mobileNavBtn')?.setAttribute('aria-expanded','true');
+  trapFocus(document.getElementById('mobileNavOverlay'));
+}
+function closeMobileNav(){
+  const o=document.getElementById('mobileNavOverlay');
+  if(o?.classList.contains('open')){ o.classList.remove('open'); $('mobileNavBtn')?.setAttribute('aria-expanded','false'); releaseFocus(); }
+}
+function openLogin(){
+  closeMobileNav();  // ensure the login modal isn't hidden behind the mobile menu
+  $('loginBody').innerHTML=`<div class="login-hero">
+      <div class="login-icon"><i data-lucide="shield-check"></i></div>
+      <div class="login-title">Welcome to DNSentinel</div>
+      <p class="login-sub">Sign in with a magic link to sync your scan history across devices and get email alerts for monitored domains. No password required.</p>
+    </div>
+    <form id="loginForm" onsubmit="return submitLogin(event)">
+      <div class="login-field">
+        <i class="field-ico" data-lucide="mail"></i>
+        <input id="loginEmail" class="login-input" type="email" placeholder="you@example.com" autocomplete="email" required>
+      </div>
+      <button type="submit" class="btn-analyze" id="loginSubmit" style="width:100%">Send magic link →</button>
+    </form>
+    <div class="login-note"><i data-lucide="lock"></i>Passwordless &amp; secure — the link expires in 15 minutes</div>`;
+  if(window.lucide) lucide.createIcons({ root: $('loginBody') });
+  $('loginOverlay').classList.add('open');
+  trapFocus($('loginOverlay'));
+}
+function closeLogin(){ const o=$('loginOverlay'); if(o.classList.contains('open')){ o.classList.remove('open'); releaseFocus(); } }
+
+async function submitLogin(e){
+  e.preventDefault();
+  const email=$('loginEmail').value.trim();
+  const btn=$('loginSubmit'); btn.disabled=true; btn.textContent='Sending…';
+  try{
+    const r=await fetch('/api/auth/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'Request failed');
+    $('loginBody').innerHTML=`<div class="login-success">
+      <div class="login-success-ico"><i data-lucide="mail-check"></i></div>
+      <div class="login-title">Check your inbox</div>
+      <div style="font-size:13px;color:var(--text-muted);line-height:1.6;max-width:300px;margin:0 auto">We sent a sign-in link to <b style="color:var(--text)">${esc(email)}</b>. It expires in 15 minutes.</div>
+      ${d.consoleMode?'<div style="font-size:11px;color:var(--warn);margin-top:14px">Dev mode: email isn\'t configured, so the link was logged to the server console.</div>':''}
+    </div>`;
+    if(window.lucide) lucide.createIcons({ root: $('loginBody') });
+  }catch(err){
+    toast(err.message||'Could not send link','err'); btn.disabled=false; btn.textContent='Send magic link →';
+  }
+  return false;
+}
+
+async function logout(){
+  try{ await fetch('/api/auth/logout',{method:'POST'}); }catch(e){}
+  currentUser=null; renderAccount();
+  // Clear locally-cached account data so it isn't visible after signing out
+  // (history, comparisons, watchlist and recent searches were synced from the server).
+  try{ localStorage.removeItem(SNAP_KEY); localStorage.removeItem(WATCH_KEY); localStorage.removeItem(HIST_KEY); }catch(e){}
+  closeCompare(); closeMonitor(); hideHistoryDropdown();
+  renderMonitor(); syncWatchBtn();
+  if($('cmpOverlay').classList.contains('open')){ renderHistory(); renderCompare(); }
+  toast('Signed out','info',2000);
+}
+
+// When signed in, the server is the source of truth — pull history + alerts into
+// the local stores the UI already reads from.
+async function pullServerData(){
+  try{
+    const [h,a]=await Promise.all([
+      fetch('/api/history').then(r=>r.json()).catch(()=>({})),
+      fetch('/api/alerts').then(r=>r.json()).catch(()=>({})),
+    ]);
+    if(Array.isArray(h.history)){
+      try{ localStorage.setItem(SNAP_KEY, JSON.stringify(h.history.slice(0,40))); }catch(e){}
+    }
+    if(Array.isArray(a.alerts)){
+      const watch=a.alerts.map(x=>({domain:x.domain, addedAt:x.lastChecked||Date.now(), baseline:x.last||{}, last:x.last||null, lastChanges:[], emailEnabled:x.emailEnabled!==false}));
+      setWatch(watch);
+    }
+    if($('cmpOverlay').classList.contains('open')){ renderHistory(); renderCompare(); }
+    if($('monOverlay').classList.contains('open')){ renderMonitor(); }
+  }catch(e){}
+}
+
+// Write-through helpers used by saveSnapshot / toggleWatch when authenticated.
+function syncHistoryToServer(domain, snap){
+  if(!currentUser) return;
+  fetch('/api/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain,snapshot:snap})}).catch(()=>{});
+}
+function syncAlertToServer(domain, emailEnabled){
+  if(!currentUser) return;
+  fetch('/api/alerts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain,emailEnabled})}).catch(()=>{});
+}
+function removeAlertFromServer(domain){
+  if(!currentUser) return;
+  fetch('/api/alerts/'+encodeURIComponent(domain),{method:'DELETE'}).catch(()=>{});
+}
+
+// Surface the magic-link redirect result, then clean the URL.
+(function(){
+  const p=new URLSearchParams(window.location.search);
+  const auth=p.get('auth');
+  if(auth){
+    if(auth==='ok') toast('Signed in successfully','ok');
+    else if(auth==='invalid') toast('That sign-in link is invalid or expired','err',5000);
+    p.delete('auth');
+    const qs=p.toString();
+    history.replaceState(null,'',window.location.pathname+(qs?'?'+qs:''));
+  }
+})();
+checkAuth();
+
+// PWA: register the service worker (makes the app installable + offline-capable).
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{ navigator.serviceWorker.register('/sw.js').catch(()=>{}); });
+}
+
+// ── Render: Security Headers ───────────────────────────────────
+function renderHeaders(data){
+  if(data.error){
+    $('headersContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return;
+  }
+  
+  const analysis=data.analysis||{};
+  const checks=analysis.checks||{};
+  const score=analysis.score||0;
+  const scoreColor=score>=80?'var(--ok)':score>=60?'#a3e635':score>=40?'var(--warn)':'var(--err)';
+  const ratingLabel=analysis.rating==='excellent'?'Excellent':analysis.rating==='good'?'Good':analysis.rating==='fair'?'Fair':'Poor';
+  
+  const checksHtml=Object.entries(checks).map(([name,c])=>{
+    const icon=c.passed?'✓':c.deprecated?'⚠':'✗';
+    const color=c.passed?'var(--ok)':c.deprecated?'var(--warn)':'var(--err)';
+    const badge=c.passed?'ok':c.deprecated?'warn':'err';
+    const badgeLabel=c.passed?'PASS':c.deprecated?'DEPRECATED':'MISSING';
+    const deprecatedNote=c.deprecated?'<div style="font-size:11px;color:var(--warn);margin-top:4px">Should be removed</div>':'';
+    const valueNote=c.detail&&c.detail!=='missing'&&c.detail!=='present'&&!c.passed?`<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Current: ${esc(c.detail)}</div>`:'';
+    return `<div class="chk-row">
+      <span class="chk-icon" style="color:${color}">${icon}</span>
+      <div style="flex:1"><div class="chk-name">${esc(name)}</div><div class="chk-desc">${esc(c.detail)||'Header not present'}</div>${valueNote}${deprecatedNote}</div>
+      <span class="pill ${badge}">${badgeLabel}</span>
+    </div>`;
+  }).join('');
+  
+  const recs=analysis.recommendations&&analysis.recommendations.length>0?
+    `<div class="card" style="padding:20px;margin-top:14px;border-color:rgba(245,158,11,.2);background:rgba(245,158,11,.06)">
+      <div style="font-size:13px;font-weight:700;color:var(--warn);margin-bottom:12px">Recommendations</div>
+      ${analysis.recommendations.map(n=>`<div style="font-size:12px;color:var(--text-muted);padding:6px 10px;background:rgba(245,158,11,.05);border-radius:8px;border:1px solid rgba(245,158,11,.15);margin-bottom:6px">→ ${esc(n)}</div>`).join('')}
+    </div>`:'';
+  
+  const httpBadge=data.http2?'<span class="pill ok">HTTP/2 ✓</span>':'<span class="pill">HTTP/1.1</span>';
+  
+  $('headersContent').innerHTML=`<div class="sec-layout">
+    <div class="card" style="padding:28px;text-align:center">
+      <div class="sec-label" style="padding:0 0 12px">Header Score</div>
+      <div class="big-score" style="color:${scoreColor};text-shadow:0 0 40px ${scoreColor}66">${score}<span style="font-size:28px;color:var(--text-faint)">/100</span></div>
+      <div style="font-size:13px;color:var(--text-muted);margin-top:10px">${ratingLabel}</div>
+      <div style="margin-top:20px;height:6px;background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${score}%;background:${scoreColor};border-radius:3px;transition:width 1.2s cubic-bezier(.4,0,.2,1);box-shadow:0 0 16px ${scoreColor}88"></div>
+      </div>
+      <div style="margin-top:20px">${httpBadge} <span class="pill">Status ${data.statusCode||'—'}</span></div>
+    </div>
+    <div class="card" style="overflow:hidden"><div class="sec-label">Security Headers</div>${checksHtml}</div>
+  </div>${recs}`;
+}
+
+// ── Render: DNSSEC ─────────────────────────────────────────────
+function renderDnssec(data){
+  if(data.error){
+    $('dnssecContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return;
+  }
+  
+  const rating=data.rating||'unknown';
+  const ratingColor=rating==='good'?'var(--ok)':rating==='incomplete'?'var(--warn)':'var(--text-muted)';
+  const ratingLabel=rating==='good'?'Configured':rating==='incomplete'?'Partial':'Not Configured';
+  
+  const dnskeyHtml=data.checks?.dnskey?.present?
+    data.checks.dnskey.records.map(r=>`<div style="padding:10px 14px;background:rgba(99,102,241,.05);border-radius:8px;margin-bottom:8px">
+      <span class="pill accent" style="margin-right:8px">${esc(r.keyType)}</span>
+      <span style="font-size:12px;color:var(--text-dim)">Algorithm ${esc(String(r.algorithm))} · KeyTag ${esc(String(r.keyTag))}</span>
+    </div>`).join(''):
+    '<div style="padding:14px;color:var(--text-muted)">No DNSKEY records found</div>';
+  
+  const dsHtml=data.checks?.ds?.present?
+    data.checks.ds.records.map(r=>`<div style="padding:10px 14px;background:rgba(16,185,129,.05);border-radius:8px;margin-bottom:8px">
+      <span style="font-size:12px;color:var(--text-dim)">KeyTag ${esc(String(r.keyTag))} · Algorithm ${esc(String(r.algorithm))} · Digest ${esc(String(r.digestType))}</span>
+    </div>`).join(''):
+    '<div style="padding:14px;color:var(--text-muted)">No DS records found at parent zone</div>';
+  
+  const issues=data.issues&&data.issues.length>0?
+    `<div class="card" style="padding:16px;margin-top:14px;border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.05)">
+      <div style="font-size:13px;font-weight:700;color:var(--err);margin-bottom:10px">Issues</div>
+      ${data.issues.map(i=>`<div style="font-size:12px;color:var(--text-muted);padding:4px 0">• ${esc(i)}</div>`).join('')}
+    </div>`:'';
+  
+  const recs=data.recommendations&&data.recommendations.length>0?
+    `<div class="card" style="padding:16px;margin-top:14px;border-color:rgba(245,158,11,.2);background:rgba(245,158,11,.05)">
+      <div style="font-size:13px;font-weight:700;color:var(--warn);margin-bottom:10px">Recommendations</div>
+      ${data.recommendations.map(r=>`<div style="font-size:12px;color:var(--text-muted);padding:4px 0">→ ${esc(r)}</div>`).join('')}
+    </div>`:'';
+  
+  $('dnssecContent').innerHTML=`<div class="card" style="padding:24px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:16px">
+      <div style="font-size:48px">${rating==='good'?'🔐':'🔓'}</div>
+      <div>
+        <div style="font-size:18px;font-weight:700;color:${ratingColor}">${ratingLabel}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">DNSSEC Status for ${esc(data.domain||'')}</div>
+      </div>
+    </div>
+  </div>
+  <div class="dns-grid">
+    <div class="card dns-card">
+      <div class="dns-card-head">
+        <div class="dns-card-title"><span class="rtype-badge" style="background:var(--accent-subtle);border:1px solid var(--accent-border);color:var(--accent)">DNSKEY</span> DNS Keys</div>
+      </div>
+      ${dnskeyHtml}
+    </div>
+    <div class="card dns-card">
+      <div class="dns-card-head">
+        <div class="dns-card-title"><span class="rtype-badge" style="background:var(--brand-subtle);border:1px solid var(--brand-border);color:var(--brand)">DS</span> Delegation Signer</div>
+      </div>
+      ${dsHtml}
+    </div>
+  </div>${issues}${recs}`;
+}
+
+// ── Render: OCSP ──────────────────────────────────────────────
+function renderOcsp(data){
+  if(data.error){
+    $('ocspContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return;
+  }
+  
+  const rating=data.rating||'unknown';
+  const ratingColor=rating==='good'?'var(--ok)':rating==='warning'?'var(--warn)':'var(--text-muted)';
+  const ratingLabel=rating==='good'?'Good':rating==='warning'?'Warning':rating==='fair'?'Fair':'Unknown';
+  
+  const issueItems=data.issues&&data.issues.length>0?
+    data.issues.map(i=>`<div style="font-size:12px;color:var(--text-muted);padding:4px 0">• ${esc(i)}</div>`).join(''):'';
+  
+  $('ocspContent').innerHTML=`<div class="card" style="padding:24px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:16px">
+      <div style="font-size:48px">${rating==='good'?'✓':'⚠'}</div>
+      <div>
+        <div style="font-size:18px;font-weight:700;color:${ratingColor}">${ratingLabel}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">Certificate Revocation Status</div>
+      </div>
+    </div>
+  </div>
+  <div class="ssl-grid">
+    <div class="card" style="padding:24px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:16px">Certificate</div>
+      ${irow('Serial',data.certificate?.serialNumber||'—')}
+      ${irow('Issuer',data.certificate?.issuer||'—')}
+      ${irow('Valid From',data.certificate?.validFrom||'—')}
+      ${irow('Valid To',data.certificate?.validTo||'—')}
+    </div>
+    <div class="card" style="padding:24px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:16px">Revocation Checking</div>
+      ${irow('OCSP Supported',data.ocsp?.supported?'Yes ✓':'No','var(--ok)')}
+      ${data.ocsp?.responderURL?irow('OCSP Responder',esc(data.ocsp.responderURL)):''}
+      ${irow('CRL Supported',data.crl?.supported?'Yes ✓':'No','var(--ok)')}
+      ${data.crl?.distributionPoint?irow('CRL Distribution',esc(data.crl.distributionPoint)):''}
+      ${irow('Stapling Available',data.stapling?.supported?'Yes ✓':'No','var(--ok)')}
+    </div>
+  </div>
+  ${issueItems?`<div class="card" style="padding:16px;margin-top:14px;border-color:rgba(245,158,11,.2);background:rgba(245,158,11,.05)">
+    <div style="font-size:13px;font-weight:700;color:var(--warn);margin-bottom:10px">Issues</div>
+    ${issueItems}
+  </div>`:''}`;
+}
+
+// ── Render: MTA-STS ───────────────────────────────────────────
+function renderMtasts(data){
+  if(data.error){
+    $('mtastsContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return;
+  }
+  
+  const rating=data.rating||'not_configured';
+  const ratingColor=rating==='good'?'var(--ok)':rating==='partial'?'var(--warn)':'var(--text-muted)';
+  const ratingLabel=rating==='good'?'Protected':rating==='partial'?'Partial':'Not Protected';
+  
+  const mtaStsBadge=data.mtaSts?.present?
+    `<span class="pill ok">DNS Record ✓</span>`:
+    `<span class="pill err">DNS Missing ✗</span>`;
+  const mtaStsWellKnownBadge=data.mtaSts?.wellKnown?.present?
+    `<span class="pill ok">HTTPS Policy ✓</span>`:
+    `<span class="pill warn">HTTPS Policy ✗</span>`;
+  
+  const policyHtml=data.mtaSts?.policy?
+    `<div style="padding:14px;background:rgba(99,102,241,.05);border-radius:8px;margin-top:10px">
+      ${data.mtaSts.policy.version?`<div style="font-size:12px;margin-bottom:4px"><span style="color:var(--text-muted)">Version:</span> ${esc(data.mtaSts.policy.version)}</div>`:''}
+      ${data.mtaSts.policy.mode?`<div style="font-size:12px;margin-bottom:4px"><span style="color:var(--text-muted)">Mode:</span> <span style="font-weight:600;color:${data.mtaSts.policy.mode==='enforce'?'var(--ok)':data.mtaSts.policy.mode==='testing'?'var(--warn)':'var(--text-dim)'}">${esc(data.mtaSts.policy.mode)}</span></div>`:''}
+      ${data.mtaSts.policy.mx?`<div style="font-size:12px"><span style="color:var(--text-muted)">MX:</span> ${esc(data.mtaSts.policy.mx)}</div>`:''}
+    </div>`:'';
+  
+  const tlsaHtml=data.tlsa?.present&&data.tlsa.records?.length>0?
+    data.tlsa.records.map(r=>`<div style="padding:10px 14px;background:rgba(16,185,129,.05);border-radius:8px;margin-bottom:8px">
+      <span class="pill" style="background:var(--brand-subtle);border-color:var(--brand-border);color:var(--brand);margin-right:8px">${['CA','Service','Trust Anchor','Domain'][r.certificateUsage-1]||'Unknown'}</span>
+      <span style="font-size:11px;color:var(--text-muted)">Selector: ${r.selector} · Hash: ${r.matchingType} · ${esc(r.hash.substring(0,32))}...</span>
+    </div>`).join(''):
+    '<div style="padding:14px;color:var(--text-muted)">No TLSA records found</div>';
+  
+  const issues=data.issues&&data.issues.length>0?
+    `<div class="card" style="padding:16px;margin-top:14px;border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.05)">
+      <div style="font-size:13px;font-weight:700;color:var(--err);margin-bottom:10px">Issues</div>
+      ${data.issues.map(i=>`<div style="font-size:12px;color:var(--text-muted);padding:4px 0">• ${esc(i)}</div>`).join('')}
+    </div>`:'';
+  
+  const recs=data.recommendations&&data.recommendations.length>0?
+    `<div class="card" style="padding:16px;margin-top:14px;border-color:rgba(245,158,11,.2);background:rgba(245,158,11,.05)">
+      <div style="font-size:13px;font-weight:700;color:var(--warn);margin-bottom:10px">Recommendations</div>
+      ${data.recommendations.map(r=>`<div style="font-size:12px;color:var(--text-muted);padding:4px 0">→ ${esc(r)}</div>`).join('')}
+    </div>`:'';
+  
+  $('mtastsContent').innerHTML=`<div class="card" style="padding:24px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:16px">
+      <div style="font-size:48px">${rating==='good'?'🔒':'🔓'}</div>
+      <div>
+        <div style="font-size:18px;font-weight:700;color:${ratingColor}">${ratingLabel}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">SMTP Security for ${esc(data.domain||'')}</div>
+      </div>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
+      ${mtaStsBadge}${mtaStsWellKnownBadge}
+      ${data.tlsa?.present?'<span class="pill ok">DANE/TLSA ✓</span>':'<span class="pill warn">DANE/TLSA ✗</span>'}
+    </div>
+  </div>
+  <div class="dns-grid">
+    <div class="card dns-card">
+      <div class="dns-card-head">
+        <div class="dns-card-title"><span class="rtype-badge" style="background:var(--accent-subtle);border:1px solid var(--accent-border);color:var(--accent)">MTA-STS</span> Mail Transfer Agent Strict Transport Security</div>
+      </div>
+      <div style="padding:14px">
+        ${data.mtaSts?.present?'<span class="pill ok" style="margin-bottom:10px">Record Present</span>':'<span style="color:var(--err)">No MTA-STS DNS record</span>'}
+        ${policyHtml}
+      </div>
+    </div>
+    <div class="card dns-card">
+      <div class="dns-card-head">
+        <div class="dns-card-title"><span class="rtype-badge" style="background:var(--brand-subtle);border:1px solid var(--brand-border);color:var(--brand)">TLSA</span> DNS-Based Authentication of Named Entities</div>
+      </div>
+      <div style="padding:14px">${tlsaHtml}</div>
+    </div>
+  </div>${issues}${recs}`;
+}
+
+// ── Render: MX/SMTP ───────────────────────────────────────────
+function renderMx(data){
+  if(data.error){ $('mxContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const servers=data.mxServers||[];
+  if(!servers.length){
+    $('mxContent').innerHTML=`<div class="card" style="padding:24px;text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">📧</div>
+      <div style="color:var(--text-muted)">No MX records found</div>
+    </div>`;
+    return;
+  }
+  const serversHtml=servers.map(s=>`<div class="card" style="padding:16px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span class="rtype-badge" style="background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.32);color:var(--purple)">P${s.priority}</span>
+      <span style="font-weight:600;font-family:'JetBrains Mono',monospace;font-size:13px">${esc(s.host)}</span>
+      ${s.ipv4?`<span class="pill">${esc(s.ipv4)}</span>`:''}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      ${s.smtp.starttls?`<span class="pill ok">✓ STARTTLS</span>`:'<span class="pill warn">✗ STARTTLS</span>'}
+      ${s.smtp.banner?`<span class="pill" style="max-width:300px;overflow:hidden;text-overflow:ellipsis">${esc(s.smtp.banner.substring(0,80))}</span>`:''}
+    </div>
+  </div>`).join('');
+  $('mxContent').innerHTML=`${serversHtml}`;
+}
+
+// ── Render: Trace ───────────────────────────────────────────
+function renderTrace(data){
+  if(data.error){ $('traceContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const dualBadge=data.dualStack?'<span class="pill ok">Dual Stack ✓</span>':'<span class="pill warn">Single Stack</span>';
+  $('traceContent').innerHTML=`<div class="ssl-grid">
+    <div class="card" style="padding:20px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:14px">IP Addresses</div>
+      ${data.hasIPv4?`<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05)"><span class="pill accent">IPv4</span> ${esc(data.ipv4||'')}</div>`:''}
+      ${data.hasIPv6?`<div style="padding:8px 0"><span class="pill info">IPv6</span> ${esc(data.ipv6||'')}</div>`:''}
+    </div>
+    <div class="card" style="padding:20px;text-align:center">
+      <div style="font-size:40px;margin-bottom:10px">🌐</div>
+      <div style="font-size:14px;font-weight:600">${data.message||'Connectivity'}</div>
+      <div style="margin-top:10px">${dualBadge}</div>
+    </div>
+  </div>`;
+}
+
+// ── Render: Technology ──────────────────────────────────────
+function renderTech(data){
+  if(data.error){ $('techContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const d=data.detected||{};
+  const cats=[['CMS',d.cms],['Frameworks',d.frameworks],['JavaScript',d.javascript],['Hosting',d.hosting],['Analytics',d.analytics],['Security',d.security],['Servers',d.servers]];
+  const techHtml=cats.filter(([,v])=>v&&v.length).map(([label,items])=>`<div style="margin-bottom:12px">
+    <div style="font-size:11px;font-weight:600;color:var(--text-faint);margin-bottom:8px">${label}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${items.map(t=>`<span class="pill">${esc(t)}</span>`).join('')}</div>
+  </div>`).join('');
+  $('techContent').innerHTML=`<div class="card" style="padding:20px">
+    <div style="font-size:14px;font-weight:600;margin-bottom:16px">🔍 Technology Detection</div>
+    ${techHtml||'<div style="color:var(--text-muted)">No technologies detected</div>'}
+  </div>`;
+}
+
+// ── Render: HTTP ─────────────────────────────────────────────
+function renderHttp(data){
+  if(data.error){ $('httpContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const score=data.score||0;
+  const scoreColor=score>=80?'var(--ok)':score>=60?'#a3e635':score>=40?'var(--warn)':'var(--err)';
+  $('httpContent').innerHTML=`<div class="ssl-grid">
+    <div class="card" style="padding:24px;text-align:center">
+      <div style="font-size:11px;font-weight:600;color:var(--text-faint);margin-bottom:12px">HTTP SCORE</div>
+      <div style="font-family:'Manrope',sans-serif;font-size:56px;font-weight:900;color:${scoreColor}">${score}</div>
+      <div style="margin-top:16px;height:6px;background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${score}%;background:${scoreColor};border-radius:3px"></div>
+      </div>
+    </div>
+    <div class="card" style="padding:20px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:14px">Protocols</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${data.protocols?.http2?`<span class="pill ok">HTTP/2 ✓</span>`:'<span class="pill">HTTP/2 ✗</span>'}
+        ${data.protocols?.http3?`<span class="pill ok">HTTP/3 ✓</span>`:''}
+        ${data.compression?.gzip?`<span class="pill ok">Gzip</span>`:''}
+        ${data.compression?.brotli?`<span class="pill ok">Brotli</span>`:''}
+      </div>
+      ${data.recommendations?.length?`<div style="margin-top:16px">${data.recommendations.map(r=>`<div style="font-size:11px;color:var(--warn);padding:4px 0">→ ${esc(r)}</div>`).join('')}</div>`:''}
+    </div>
+  </div>`;
+}
+
+// ── Render: Redirect ─────────────────────────────────────────
+function renderRedirect(data){
+  if(data.error){ $('redirectContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const chain=data.chain||[];
+  const chainHtml=chain.map((h,i)=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)">
+    <span style="width:24px;height:24px;border-radius:50%;background:var(--accent-subtle);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${i+1}</span>
+    <div style="flex:1;min-width:0">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;word-break:break-all;color:var(--text-dim)">${esc(h.url)}</div>
+      ${h.redirectTo?`<div style="font-size:11px;color:var(--accent);margin-top:4px">→ ${esc(h.redirectTo)}</div>`:''}
+      ${h.statusCode?`<span class="pill" style="margin-top:4px">${h.statusCode}</span>`:''}
+    </div>
+    ${h.durationMs?`<span style="font-size:10px;color:var(--text-faint)">${h.durationMs}ms</span>`:''}
+  </div>`).join('');
+  $('redirectContent').innerHTML=`<div class="card" style="padding:20px;margin-bottom:14px">
+    <div style="font-size:14px;font-weight:600">🔀 ${data.message||'Redirect Chain'}</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${chain.length} hops · ${data.totalTimeMs||0}ms</div>
+  </div>
+  <div class="card" style="padding:16px">${chainHtml||'<div style="color:var(--text-muted)">No redirects</div>'}</div>`;
+}
+
+// ── Render: CORS ──────────────────────────────────────────────
+function renderCors(data){
+  if(data.error){ $('corsContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const cors=data.cors||{};
+  $('corsContent').innerHTML=`<div class="ssl-grid">
+    <div class="card" style="padding:20px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:14px">🔗 CORS Status</div>
+      <div style="font-size:14px;color:${cors.enabled?'var(--ok)':'var(--text-muted)'}">${cors.enabled?'Enabled':'Disabled'}</div>
+      ${cors.origin?`<div style="margin-top:10px;font-size:12px;color:var(--text-muted)">Origin: <span style="font-family:'JetBrains Mono',monospace">${esc(cors.origin)}</span></div>`:''}
+    </div>
+    <div class="card" style="padding:20px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:14px">Configuration</div>
+      ${irow('Credentials',cors.credentials?'Yes':'No')}
+      ${cors.methods?.length?`<div style="margin-top:10px"><div style="font-size:11px;color:var(--text-muted)">Methods:</div><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">${cors.methods.map(m=>`<span class="pill">${esc(m)}</span>`).join('')}</div></div>`:''}
+    </div>
+  </div>
+  ${data.issues?.length?`<div class="card" style="padding:16px;margin-top:14px;border-color:rgba(245,158,11,.2);background:rgba(245,158,11,.05)">
+    ${data.issues.map(i=>`<div style="font-size:12px;color:var(--warn);padding:4px 0">• ${esc(i)}</div>`).join('')}
+  </div>`:''}`;
+}
+
+// ── Render: Robots ────────────────────────────────────────────
+function renderRobots(data){
+  if(data.error){ $('robotsContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const robots=data.robots||{};
+  const sitemap=data.sitemap||{};
+  $('robotsContent').innerHTML=`<div class="ssl-grid">
+    <div class="card" style="padding:20px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">🤖 robots.txt</div>
+      <span class="pill ${robots.present?'ok':'warn'}">${robots.present?'Present':'Missing'}</span>
+      ${robots.rules?.length?`<div style="margin-top:12px;font-size:11px;color:var(--text-muted)">${robots.rules.length} rule(s) defined</div>`:''}
+    </div>
+    <div class="card" style="padding:20px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">🗺️ sitemap.xml</div>
+      <span class="pill ${sitemap.present?'ok':'warn'}">${sitemap.present?'Present':'Missing'}</span>
+      ${sitemap.totalUrls?`<div style="margin-top:12px;font-size:11px;color:var(--text-muted)">${sitemap.totalUrls} URL(s) indexed</div>`:''}
+    </div>
+  </div>`;
+}
+
+// ── Render: CT Logs ────────────────────────────────────────────
+function renderCt(data){
+  if(data.error){ $('ctContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const subdomains=data.subdomains||[];
+  $('ctContent').innerHTML=`<div class="card" style="padding:20px;margin-bottom:14px">
+    <div style="font-size:14px;font-weight:600">📜 Certificate Transparency</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${subdomains.length} subdomain(s) found</div>
+  </div>
+  ${subdomains.length?`<div class="card" style="padding:16px">
+    <div style="display:flex;flex-wrap:wrap;gap:8px">${subdomains.slice(0,30).map(s=>`<span class="pill">${esc(s)}</span>`).join('')}</div>
+    ${subdomains.length>30?`<div style="margin-top:10px;color:var(--text-muted)">+${subdomains.length-30} more</div>`:''}
+  </div>`:'<div class="card" style="padding:24px;text-align:center;color:var(--text-muted)">No subdomains found in CT logs</div>'}`;
+}
+
+// ── Render: Email Security ─────────────────────────────────────
+function renderEmailSec(data){
+  if(data.error){ $('emailsecContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const ratingColor=data.rating==='strong'?'var(--ok)':data.rating==='good'?'#a3e635':data.rating==='fair'?'var(--warn)':'var(--err)';
+  const ratingLabel=data.rating==='strong'?'Strong':data.rating==='good'?'Good':data.rating==='fair'?'Fair':'Weak';
+
+  function scoreBar(score,color){ return `<div style="margin-top:6px;height:4px;background:rgba(255,255,255,.05);border-radius:2px;overflow:hidden"><div style="height:100%;width:${score}%;background:${color};border-radius:2px"></div></div>`; }
+  function issueList(arr){ return arr.length?arr.map(i=>`<div style="font-size:11px;color:var(--warn);padding:3px 0">⚠ ${esc(i)}</div>`).join(''):'<div style="font-size:11px;color:var(--ok)">✓ No issues found</div>'; }
+
+  const spf=data.spf||{}; const dmarc=data.dmarc||{}; const dkim=data.dkim||{}; const bimi=data.bimi||{};
+  const spfColor=spf.score>=85?'var(--ok)':spf.score>=60?'var(--warn)':'var(--err)';
+  const dmarcColor=dmarc.score>=85?'var(--ok)':dmarc.score>=60?'var(--warn)':'var(--err)';
+
+  const dmarcPolicyBadge=dmarc.policy?
+    `<span class="pill ${dmarc.policy==='reject'?'ok':dmarc.policy==='quarantine'?'warn':'err'}">${esc(dmarc.policy)}</span>`:'';
+  const pctBadge=dmarc.pct!=null&&dmarc.pct<100?`<span class="pill warn">pct=${dmarc.pct}%</span>`:'';
+
+  const recsHtml=data.recommendations&&data.recommendations.length>0?
+    `<div class="card" style="padding:16px;margin-top:14px;border-color:rgba(245,158,11,.2);background:rgba(245,158,11,.05)">
+      <div style="font-size:13px;font-weight:700;color:var(--warn);margin-bottom:10px">Recommendations</div>
+      ${data.recommendations.map(r=>`<div style="font-size:12px;color:var(--text-muted);padding:5px 10px;background:rgba(245,158,11,.05);border-radius:6px;border:1px solid rgba(245,158,11,.1);margin-bottom:4px">→ ${esc(r)}</div>`).join('')}
+    </div>`:'';
+
+  $('emailsecContent').innerHTML=`
+  <div class="card" style="padding:24px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:16px">
+      <div style="font-size:44px">📧</div>
+      <div style="flex:1">
+        <div style="font-size:18px;font-weight:700;color:${ratingColor}">${ratingLabel} Email Authentication</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">Score: ${data.overallScore}/100 for ${esc(data.domain||'')}</div>
+        <div style="margin-top:10px;height:6px;background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden"><div style="height:100%;width:${data.overallScore}%;background:${ratingColor};border-radius:3px;transition:width 1.2s"></div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0">
+        <span class="pill ${spf.present?'ok':'err'}">SPF ${spf.present?'✓':'✗'}</span>
+        <span class="pill ${dmarc.present?'ok':'err'}">DMARC ${dmarc.present?'✓':'✗'}</span>
+        <span class="pill ${dkim.present?'ok':'err'}">DKIM ${dkim.present?'✓':'✗'}</span>
+        <span class="pill ${bimi.present?'ok':''}">${bimi.present?'BIMI ✓':'BIMI ✗'}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="dns-grid">
+    <div class="card dns-card">
+      <div class="dns-card-head">
+        <div class="dns-card-title"><span class="rtype-badge" style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.32);color:#f59e0b">SPF</span> Sender Policy Framework</div>
+        <span style="font-size:11px;font-weight:700;color:${spfColor}">${spf.score||0}/100</span>
+      </div>
+      <div style="padding:14px">
+        ${spf.present?`
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--accent);word-break:break-all;padding:8px;background:rgba(99,102,241,.05);border-radius:6px;margin-bottom:10px">${esc(spf.record||'')}</div>
+          ${spf.policy?`<span class="pill ${spf.policy==='-all'?'ok':spf.policy==='+all'?'err':'warn'}">${esc(spf.policy)}</span> `:''}
+          ${scoreBar(spf.score||0,spfColor)}
+          <div style="margin-top:10px">${issueList(spf.issues||[])}</div>
+        `:`<div style="color:var(--err);font-size:13px">✗ No SPF record found</div><div style="font-size:11px;color:var(--text-muted);margin-top:6px">Publish a TXT record at ${esc(data.domain||'')} starting with v=spf1</div>`}
+      </div>
+    </div>
+
+    <div class="card dns-card">
+      <div class="dns-card-head">
+        <div class="dns-card-title"><span class="rtype-badge" style="background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.32);color:#60a5fa">DMARC</span> Domain-based Message Authentication</div>
+        <span style="font-size:11px;font-weight:700;color:${dmarcColor}">${dmarc.score||0}/100</span>
+      </div>
+      <div style="padding:14px">
+        ${dmarc.present?`
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--accent);word-break:break-all;padding:8px;background:rgba(99,102,241,.05);border-radius:6px;margin-bottom:10px">${esc(dmarc.record||'')}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${dmarcPolicyBadge}${pctBadge}${dmarc.rua?'<span class="pill ok">Reports ✓</span>':'<span class="pill warn">No Reports</span>'}</div>
+          ${dmarc.adkim?`<div style="font-size:11px;color:var(--text-muted)">DKIM alignment: ${dmarc.adkim==='s'?'strict':'relaxed'} · SPF alignment: ${dmarc.aspf==='s'?'strict':'relaxed'}</div>`:''}
+          ${scoreBar(dmarc.score||0,dmarcColor)}
+          <div style="margin-top:10px">${issueList(dmarc.issues||[])}</div>
+        `:`<div style="color:var(--err);font-size:13px">✗ No DMARC record found</div><div style="font-size:11px;color:var(--text-muted);margin-top:6px">Publish a TXT record at _dmarc.${esc(data.domain||'')}</div>`}
+      </div>
+    </div>
+
+    <div class="card dns-card">
+      <div class="dns-card-head">
+        <div class="dns-card-title"><span class="rtype-badge" style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.32);color:var(--brand)">DKIM</span> DomainKeys Identified Mail</div>
+      </div>
+      <div style="padding:14px">
+        ${dkim.present?`
+          <span class="pill ok" style="margin-bottom:10px">✓ DKIM configured</span>
+          <div style="margin-top:10px"><div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Found selectors:</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">${(dkim.selectors||[]).map(s=>`<span class="pill">${esc(s)}</span>`).join('')}</div></div>
+        `:`<div style="color:var(--err);font-size:13px">✗ No DKIM public keys found</div><div style="font-size:11px;color:var(--text-muted);margin-top:6px">Checked ${16} common selectors — configure DKIM signing with your mail provider</div>`}
+      </div>
+    </div>
+
+    <div class="card dns-card">
+      <div class="dns-card-head">
+        <div class="dns-card-title"><span class="rtype-badge" style="background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.32);color:var(--purple)">BIMI</span> Brand Indicators for Message Identification</div>
+      </div>
+      <div style="padding:14px">
+        ${bimi.present?`
+          <span class="pill ok" style="margin-bottom:10px">✓ BIMI record present</span>
+          ${bimi.logoUrl?`<div style="margin-top:10px;font-size:11px;color:var(--text-muted)">Logo: <span style="font-family:'JetBrains Mono',monospace;color:var(--accent)">${esc(bimi.logoUrl)}</span></div>`:''}
+        `:`<div style="color:var(--text-muted);font-size:13px">No BIMI record</div><div style="font-size:11px;color:var(--text-faint);margin-top:6px">BIMI displays your brand logo in supporting email clients. Requires DMARC enforcement (p=quarantine/reject).</div>`}
+      </div>
+    </div>
+  </div>
+  ${recsHtml}`;
+}
+
+// ── Email Sec Stat ─────────────────────────────────────────────
+function emailSecStat(d){
+  if(!d||d.error){ setStat('sEmail','—',''); return; }
+  const s=d.overallScore||0;
+  setStat('sEmail',s+'%',s>=80?'ok':s>=50?'warn':'err');
+}
+
+// ── Tab Health Indicators ──────────────────────────────────────
+const HEALTH_TEXT={ ok:'no issues', warn:'needs attention', err:'problems found' };
+function setTabHealth(cat,status){
+  const el=$('health-'+cat);
+  if(el){ el.className='tab-health '+status;
+    el.setAttribute('role','img');
+    el.setAttribute('aria-label', (HEALTH_TEXT[status]||status)); }
+}
+function updateTabHealth(){
+  // Core: DNS records present
+  if(S.dns){
+    const hasRec=Object.values(S.dns.results||{}).some(r=>r&&r.length>0);
+    setTabHealth('core',hasRec?'ok':'warn');
+  }
+  // Security: SSL grade + header score
+  if(S.ssl&&!S.ssl.error&&S.headers){
+    const sslScore=S.ssl.grade?.score||0;
+    const hScore=S.headers.analysis?.score||0;
+    setTabHealth('security',sslScore>=70&&hScore>=60?'ok':sslScore>=50||hScore>=40?'warn':'err');
+  } else if(S.ssl&&!S.ssl.error){
+    const s=S.ssl.grade?.score||0;
+    setTabHealth('security',s>=70?'ok':s>=50?'warn':'err');
+  }
+  // Email: overall email score
+  if(S.emailsec&&!S.emailsec.error){
+    const s=S.emailsec.overallScore||0;
+    setTabHealth('email',s>=80?'ok':s>=50?'warn':'err');
+  } else if(S.dns?.insights?.checks){
+    const c=S.dns.insights.checks;
+    const n=(c.spf?1:0)+(c.dmarc?1:0)+(c.mx?1:0);
+    setTabHealth('email',n===3?'ok':n>=2?'warn':'err');
+  }
+  // Network: IPv6
+  if(S.ipv6){
+    setTabHealth('network',S.ipv6.ipv6Enabled?'ok':'warn');
+  }
+  // Web: HTTP score
+  if(S.http&&!S.http.error){
+    const s=S.http.score||0;
+    setTabHealth('web',s>=80?'ok':s>=50?'warn':'err');
+  }
+  // Intelligence: typosquat hits
+  if(S.typosquat&&!S.typosquat.error){
+    const hits=(S.typosquat.results||[]).filter(r=>r.registered).length;
+    setTabHealth('intelligence',hits===0?'ok':hits<=3?'warn':'err');
+  }
+}
+
+// ── Search History ─────────────────────────────────────────────
+const HIST_KEY='hetops_dns_hist';
+function saveHistory(d){
+  let h=getHistory();
+  h=[d,...h.filter(x=>x!==d)].slice(0,8);
+  try{localStorage.setItem(HIST_KEY,JSON.stringify(h));}catch(e){}
+}
+function getHistory(){
+  try{return JSON.parse(localStorage.getItem(HIST_KEY)||'[]');}catch(e){return [];}
+}
+function showHistoryDropdown(){
+  const h=getHistory(); if(!h.length) return;
+  let dd=$('searchHistoryDd');
+  if(!dd){
+    dd=document.createElement('div');
+    dd.id='searchHistoryDd'; dd.className='search-history';
+    $('searchInput').closest('.search-wrap').appendChild(dd);
+  }
+  dd.innerHTML=`<div class="history-header">
+    <span class="history-header-label">Recent</span>
+    <button class="history-clear-btn" onclick="clearHistory()">Clear</button>
+  </div>`+h.map(d=>`<button class="history-item" onclick="quickSearch('${d}')">
+    <i data-lucide="clock" style="width:12px;height:12px;flex-shrink:0;color:var(--text-faint)"></i>
+    <span class="history-domain">${d}</span>
+  </button>`).join('');
+  dd.style.display='';
+  if(window.lucide) lucide.createIcons({ root: dd });
+}
+function hideHistoryDropdown(){
+  const dd=$('searchHistoryDd');
+  if(dd) dd.style.display='none';
+}
+function clearHistory(){
+  try{localStorage.removeItem(HIST_KEY);}catch(e){}
+  hideHistoryDropdown();
+}
+
+// ── Export Results ─────────────────────────────────────────────
+function exportResults(){
+  const domain=$('currentDomain').textContent||'unknown';
+  const payload={
+    domain,
+    exportedAt:new Date().toISOString(),
+    dns:S.dns, whois:S.whois, ssl:S.ssl, geoip:S.geoip,
+    ports:S.ports, blacklist:S.bl, propagation:S.prop,
+    securityHeaders:S.headers, dnssec:S.dnssec, dnssecChain:S.dnssecChain,
+    ocsp:S.ocsp, mtaSts:S.mtasts, emailSecurity:S.emailsec,
+    redirectChain:S.redirect, technologies:S.tech, http:S.http,
+    mxSmtp:S.mx, trace:S.trace, cors:S.cors, robots:S.robots,
+    certTransparency:S.ct, subdomainTakeover:S.takeover,
+    hstsPreload:S.hsts, cspAnalysis:S.csp,
+    typosquat:S.typosquat, ipv6:S.ipv6
+  };
+  const json=JSON.stringify(payload, null, 2);
+  const blob=new Blob([json],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=`dnsentinel-${domain}-${Date.now()}.json`; a.click();
+  URL.revokeObjectURL(url);
+  toast('Report exported as JSON','ok');
+}
+
+// ── Share & PDF ────────────────────────────────────────────────
+function getActiveTab(){
+  const t=document.querySelector('.tab-btn.active');
+  return t ? t.id.replace('tab-','') : '';
+}
+// Build a shareable permalink for the current report (domain + active tab).
+function buildShareURL(){
+  const domain=$('currentDomain').textContent||'';
+  if(!domain) return null;
+  const u=new URL(window.location.pathname, window.location.origin);
+  u.searchParams.set('domain', domain);
+  const tab=getActiveTab(); if(tab) u.searchParams.set('tab', tab);
+  return u.toString();
+}
+function shareLink(){
+  const link=buildShareURL();
+  if(!link){ toast('Run an analysis first','warn'); return; }
+  navigator.clipboard.writeText(link)
+    .then(()=>toast('Share link copied to clipboard','ok'))
+    .catch(()=>toast('Could not copy link','err'));
+}
+function exportPDF(){
+  const domain=$('currentDomain').textContent||'';
+  if(!domain){ toast('Run an analysis first','warn'); return; }
+  // Inject a branded header into the report just for the print, then remove it after.
+  const results=$('results');
+  let hdr=$('pdfPrintHeader');
+  if(!hdr){
+    hdr=document.createElement('div'); hdr.id='pdfPrintHeader';
+    results.insertBefore(hdr, results.firstChild);
+  }
+  const h=computeHealth();
+  const now=new Date();
+  hdr.innerHTML=`<div class="pdf-wm"><span class="het">DNS</span><span class="ops">entinel</span> Report</div>
+    <div class="pdf-meta">${esc(domain)}${h?` · Grade ${esc(h.grade)} (${h.pct}/100)`:''}<br>Generated ${now.toLocaleString()}</div>`;
+  toast('Opening print dialog — choose "Save as PDF"','info',2600);
+  const cleanup=()=>{ if(hdr) hdr.remove(); window.removeEventListener('afterprint',cleanup); };
+  window.addEventListener('afterprint', cleanup);
+  setTimeout(()=>window.print(), 350);
+}
+// Keep the address bar in sync so the current report is always bookmarkable.
+function syncURL(domain){
+  try{
+    const u=new URL(window.location.pathname, window.location.origin);
+    u.searchParams.set('domain', domain);
+    history.replaceState(null, '', u);
+  }catch(e){}
+}
+// Open a specific result tab by name, selecting its parent category first.
+function deepLinkTab(name){
+  const btn=$('tab-'+name); if(!btn) return;
+  const group=btn.closest('.sub-tabs-group');
+  if(group){ const m=group.id.match(/^cat-(.+)-tabs$/); if(m) selectCat(m[1]); }
+  tab(name);
+}
+
+// ── Render: Subdomain Takeover ─────────────────────────────────
+function renderTakeover(data){
+  if(data.error){ $('takeoverContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const vulns=data.vulnerabilities||[];
+  const results=data.results||[];
+  const hasVulns=vulns.length>0;
+  const headerColor=hasVulns?'var(--err)':results.length===0?'var(--text-muted)':'var(--ok)';
+  const headerIcon=hasVulns?'🔴':results.length===0?'✅':'✅';
+  const summary=hasVulns
+    ?`<span style="color:var(--err);font-weight:700">${vulns.length} potential takeover${vulns.length>1?'s':''} found!</span>`
+    :results.length===0?'No CNAMEs pointing to third-party services'
+    :`All ${results.length} CNAME(s) appear safe`;
+
+  const vulnCards=vulns.map(v=>`
+    <div class="card" style="padding:18px;margin-bottom:10px;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.06)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <span style="font-size:18px">⚠️</span>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:var(--err)">${esc(v.subdomain)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">CNAME → ${esc(v.cname)}</div>
+        </div>
+        <span class="pill err">${esc(v.service||'Unknown Service')}</span>
+      </div>
+      ${v.fingerprintMatch?`<div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-faint);background:rgba(0,0,0,.3);padding:8px 10px;border-radius:8px">Fingerprint: "${esc(v.fingerprintMatch)}"</div>`:''}
+    </div>`).join('');
+
+  const safeRows=results.filter(r=>!r.vulnerable).map(r=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+      <span style="color:var(--ok);flex-shrink:0">✓</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--text-dim);word-break:break-all">${esc(r.subdomain)}</div>
+        <div style="font-size:11px;color:var(--text-faint)">→ ${esc(r.cname)} ${r.service?`<span style="color:var(--accent)">(${esc(r.service)})</span>`:''}</div>
+      </div>
+      <span class="pill ok" style="flex-shrink:0">Safe</span>
+    </div>`).join('');
+
+  $('takeoverContent').innerHTML=`
+    <div class="card" style="padding:20px;margin-bottom:14px;${hasVulns?'border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.04)':''}">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:28px">${headerIcon}</span>
+        <div>
+          <div style="font-size:14px;font-weight:700">${summary}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px">Scanned ${data.cnamesFound||0} CNAME record${(data.cnamesFound||0)!==1?'s':''} across 18 common subdomains</div>
+        </div>
+      </div>
+    </div>
+    ${vulnCards}
+    ${safeRows?`<div class="card" style="padding:20px"><div style="font-size:13px;font-weight:600;margin-bottom:12px">Safe CNAMEs</div>${safeRows}</div>`:''}`;
+}
+
+// ── Render: HSTS Preload ────────────────────────────────────────
+function renderHsts(data){
+  if(data.error){ $('hstsContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const status=data.preloadStatus||'unknown';
+  const statusConfig={
+    preloaded: { color:'var(--ok)',  icon:'🟢', label:'On Preload List',  desc:'Domain is in Chrome\'s HSTS preload list — browsers enforce HTTPS before any request.' },
+    pending:   { color:'var(--warn)',icon:'🟡', label:'Submission Pending', desc:'Domain is pending inclusion in the preload list.' },
+    rejected:  { color:'var(--err)', icon:'🔴', label:'Submission Rejected', desc:'Previous submission was rejected. Check eligibility requirements.' },
+    unknown:   { color:data.eligible?'var(--warn)':'var(--text-muted)', icon:data.eligible?'⚡':'⚪', label:data.eligible?'Eligible but not submitted':'Not on preload list', desc:data.eligible?'All requirements met — submit at hstspreload.org to join the preload list.':'Domain has not been submitted for HSTS preloading.' },
+  };
+  const sc=statusConfig[status]||statusConfig.unknown;
+  const checks=[
+    { label:'HSTS Header Present', ok:!!data.hstsHeader, val:data.hstsHeader?'Yes':'No' },
+    { label:'Max-Age ≥ 1 year', ok:!!(data.maxAge&&data.maxAge>=31536000), val:data.maxAgeDays!=null?`${data.maxAgeDays} days`:'N/A' },
+    { label:'includeSubDomains', ok:!!data.includeSubDomains, val:data.includeSubDomains?'Present':'Missing' },
+    { label:'preload directive', ok:!!data.preloadDirective, val:data.preloadDirective?'Present':'Missing' },
+    { label:'On Chrome Preload List', ok:!!data.onPreloadList, val:data.onPreloadList?'Yes':'No' },
+  ];
+  $('hstsContent').innerHTML=`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="card" style="padding:28px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:12px">
+        <div style="font-size:48px">${sc.icon}</div>
+        <div style="font-size:16px;font-weight:700;color:${sc.color}">${esc(sc.label)}</div>
+        <div style="font-size:12px;color:var(--text-muted);line-height:1.6">${esc(sc.desc)}</div>
+      </div>
+      <div class="card" style="padding:20px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:14px">Eligibility Checklist</div>
+        ${checks.map(c=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+          <span style="color:${c.ok?'var(--ok)':'var(--err)'};font-size:14px;flex-shrink:0">${c.ok?'✓':'✗'}</span>
+          <div style="flex:1;font-size:12px">${esc(c.label)}</div>
+          <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:${c.ok?'var(--ok)':'var(--text-muted)'}">${esc(c.val)}</span>
+        </div>`).join('')}
+        ${data.hstsHeader?`<div style="margin-top:14px;padding:10px;background:rgba(0,0,0,.3);border-radius:8px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-dim);word-break:break-all">${esc(data.hstsHeader)}</div>`:''}
+      </div>
+    </div>`;
+}
+
+// ── Render: CSP Analyzer ────────────────────────────────────────
+function renderCsp(data){
+  if(data.error){ $('cspContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  if(!data.present){
+    $('cspContent').innerHTML=`<div class="card" style="padding:28px;display:flex;align-items:center;gap:16px;border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.04)">
+      <span style="font-size:40px">🧱</span>
+      <div><div style="font-size:15px;font-weight:700;color:var(--err)">No Content-Security-Policy</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:6px;line-height:1.6">CSP is the primary browser defence against XSS attacks. Without it, any injected script can execute freely.</div></div>
+    </div>`; return;
+  }
+  const grade=data.grade||'F';
+  const gc=grade==='A+'?'#34d399':grade==='A'?'var(--ok)':grade==='B'?'#a3e635':grade==='C'?'var(--warn)':grade==='D'?'#f97316':'var(--err)';
+  const dirs=data.directives||{};
+  const dirKeys=Object.keys(dirs);
+  $('cspContent').innerHTML=`
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:14px;margin-bottom:14px">
+      <div class="card" style="padding:24px 32px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px">
+        <div style="font-family:'Manrope',sans-serif;font-size:56px;font-weight:900;color:${gc};line-height:1">${esc(grade)}</div>
+        <div style="font-size:12px;color:var(--text-muted)">CSP Grade</div>
+        <div style="font-size:20px;font-weight:700">${data.score||0}<span style="font-size:13px;color:var(--text-faint)">/100</span></div>
+        ${data.isReportOnly?`<span class="pill warn">Report-Only</span>`:''}
+        ${data.hasNonce?`<span class="pill ok">nonce ✓</span>`:''}
+        ${data.hasStrictDynamic?`<span class="pill ok">strict-dynamic ✓</span>`:''}
+      </div>
+      <div class="card" style="padding:20px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">${dirKeys.length} Directive${dirKeys.length!==1?'s':''}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${dirKeys.map(k=>`<span class="pill" style="font-family:'JetBrains Mono',monospace;font-size:10px">${esc(k)}</span>`).join('')}
+        </div>
+      </div>
+    </div>
+    ${data.issues?.length?`<div class="card" style="padding:16px;margin-bottom:10px;border-color:rgba(239,68,68,.25);background:rgba(239,68,68,.04)">
+      <div style="font-size:12px;font-weight:700;color:var(--err);margin-bottom:8px">Issues (${data.issues.length})</div>
+      ${data.issues.map(i=>`<div style="font-size:12px;color:var(--text-dim);padding:5px 0;display:flex;gap:8px"><span style="color:var(--err)">✗</span>${esc(i)}</div>`).join('')}
+    </div>`:''}
+    ${data.warnings?.length?`<div class="card" style="padding:16px;margin-bottom:10px;border-color:rgba(245,158,11,.25);background:rgba(245,158,11,.04)">
+      <div style="font-size:12px;font-weight:700;color:var(--warn);margin-bottom:8px">Warnings (${data.warnings.length})</div>
+      ${data.warnings.map(w=>`<div style="font-size:12px;color:var(--text-dim);padding:5px 0;display:flex;gap:8px"><span style="color:var(--warn)">⚠</span>${esc(w)}</div>`).join('')}
+    </div>`:''}
+    <div class="card" style="padding:16px">
+      <div style="font-size:11px;font-weight:600;color:var(--text-faint);margin-bottom:8px">RAW POLICY</div>
+      <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-dim);word-break:break-all;line-height:1.8">${esc(data.rawHeader||'')}</div>
+    </div>`;
+}
+
+// ── Render: Typosquat ───────────────────────────────────────────
+function renderTyposquat(data){
+  if(data.error){ $('typosquatContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const results=data.results||[];
+  const registered=results.filter(r=>r.registered);
+  const clean=results.filter(r=>!r.registered);
+  const pct=data.total>0?Math.round(registered.length/data.total*100):0;
+  const riskColor=registered.length===0?'var(--ok)':registered.length<=3?'var(--warn)':'var(--err)';
+
+  const regRows=registered.map(r=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+    <span style="color:var(--err);flex-shrink:0;font-size:14px">⚠</span>
+    <div style="flex:1;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text)">${esc(r.domain)}</div>
+    ${r.ips?`<span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-faint)">${esc(r.ips[0]||'')}</span>`:''}
+    <span class="pill err" style="flex-shrink:0">Registered</span>
+  </div>`).join('');
+
+  $('typosquatContent').innerHTML=`
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:14px;margin-bottom:14px">
+      <div class="card" style="padding:24px 32px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px">
+        <div style="font-family:'Manrope',sans-serif;font-size:52px;font-weight:900;color:${riskColor};line-height:1">${registered.length}</div>
+        <div style="font-size:11px;color:var(--text-muted)">REGISTERED TYPOS</div>
+        <div style="font-size:12px;color:var(--text-faint)">${data.total||0} variants checked</div>
+        <div style="width:100%;height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${riskColor};border-radius:3px"></div>
+        </div>
+      </div>
+      <div class="card" style="padding:20px;overflow:hidden">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Phishing Risk</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Typosquatted domains registered by others can be used for phishing, brand impersonation, or malware distribution.</div>
+        <div style="display:flex;gap:10px">
+          <div style="flex:1;padding:12px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:10px;text-align:center">
+            <div style="font-size:20px;font-weight:700;color:var(--err)">${registered.length}</div>
+            <div style="font-size:10px;color:var(--text-muted)">Registered</div>
+          </div>
+          <div style="flex:1;padding:12px;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.2);border-radius:10px;text-align:center">
+            <div style="font-size:20px;font-weight:700;color:var(--ok)">${clean.length}</div>
+            <div style="font-size:10px;color:var(--text-muted)">Available</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    ${registered.length?`<div class="card" style="padding:20px;border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.03)">
+      <div style="font-size:13px;font-weight:700;color:var(--err);margin-bottom:12px">Registered Typosquats</div>
+      ${regRows}
+    </div>`:
+    `<div class="card" style="padding:20px;border-color:rgba(34,197,94,.2);background:rgba(34,197,94,.03)">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:28px">✅</span>
+        <div><div style="font-size:14px;font-weight:600;color:var(--ok)">No active typosquats found</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">None of the ${data.total||0} generated variants are currently registered.</div></div>
+      </div>
+    </div>`}`;
+}
+
+// ── Render: IPv6 ────────────────────────────────────────────────
+function renderIpv6(data){
+  if(data.error){ $('ipv6Content').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const score=data.score||0;
+  const scoreColor=score>=80?'var(--ok)':score>=50?'#a3e635':score>=30?'var(--warn)':'var(--err)';
+  const v4=data.ipv4||[], v6=data.ipv6||[];
+  const checks=[
+    { label:'AAAA Record Exists', ok:v6.length>0, val:v6.length>0?v6[0]:'No IPv6 address' },
+    { label:'Dual-Stack (IPv4 + IPv6)', ok:!!data.dualStack, val:data.dualStack?'Yes':'No' },
+    { label:'TLS over IPv6', ok:!!data.tlsV6?.success, val:data.tlsV6?.success?`${data.tlsV6.protocol}`:(data.tlsV6?.error||'N/A') },
+    { label:'TLS over IPv4', ok:!!data.tlsV4?.success, val:data.tlsV4?.success?`${data.tlsV4.protocol}`:(data.tlsV4?.error||'N/A') },
+  ];
+  $('ipv6Content').innerHTML=`
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:14px">
+      <div class="card" style="padding:24px 32px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px">
+        <div style="font-family:'Manrope',sans-serif;font-size:52px;font-weight:900;color:${scoreColor};line-height:1">${score}</div>
+        <div style="font-size:11px;color:var(--text-muted)">IPv6 SCORE</div>
+        <div style="height:5px;width:100%;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${score}%;background:${scoreColor};border-radius:3px"></div>
+        </div>
+        <span class="pill ${data.ipv6Enabled?'ok':'err'}">${data.ipv6Enabled?'IPv6 Enabled':'IPv6 Not Configured'}</span>
+        ${data.dualStack?`<span class="pill ok">Dual-Stack</span>`:''}
+      </div>
+      <div class="card" style="padding:20px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:14px">Connectivity</div>
+        ${checks.map(c=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+          <span style="color:${c.ok?'var(--ok)':'var(--err)'};flex-shrink:0;font-size:14px">${c.ok?'✓':'✗'}</span>
+          <div style="flex:1;font-size:12px">${esc(c.label)}</div>
+          <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-dim)">${esc(String(c.val))}</span>
+        </div>`).join('')}
+        ${v6.length?`<div style="margin-top:14px"><div style="font-size:11px;color:var(--text-faint);margin-bottom:6px">IPv6 ADDRESSES</div>
+          ${v6.map(ip=>`<div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent);padding:3px 0">${esc(ip)}</div>`).join('')}</div>`:''}
+      </div>
+    </div>`;
+}
+
+// ── Render: DNSSEC Chain ────────────────────────────────────────
+function renderDnssecChain(data){
+  if(data.error){ $('dnssecChainContent').innerHTML=`<div class="card"><div class="err-box">${esc(data.error)}</div></div>`; return; }
+  const statusConfig={
+    valid:      { color:'var(--ok)',   icon:'🟢', label:'Chain Valid' },
+    partial:    { color:'var(--warn)', icon:'🟡', label:'Partial — Issues Detected' },
+    incomplete: { color:'var(--warn)', icon:'🟠', label:'Incomplete Configuration' },
+    unsigned:   { color:'var(--err)',  icon:'⚪', label:'DNSSEC Not Enabled' },
+  };
+  const sc=statusConfig[data.status]||statusConfig.unsigned;
+  const chain=data.chain||[];
+  const issues=data.issues||[];
+
+  const chainSteps=chain.map((step,i)=>`
+    <div style="display:flex;align-items:flex-start;gap:14px;padding:14px 0;${i<chain.length-1?'border-bottom:1px solid rgba(255,255,255,.05)':''}">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:0;flex-shrink:0">
+        <div style="width:32px;height:32px;border-radius:50%;background:${step.present?'rgba(34,197,94,.15)':'rgba(239,68,68,.15)'};border:2px solid ${step.present?'var(--ok)':'var(--err)'};display:flex;align-items:center;justify-content:center;font-size:14px">${step.present?'✓':'✗'}</div>
+        ${i<chain.length-1?`<div style="width:2px;flex:1;min-height:20px;background:${step.present?'rgba(34,197,94,.3)':'rgba(239,68,68,.2)'};margin-top:4px"></div>`:''}
+      </div>
+      <div style="flex:1;padding-top:4px">
+        <div style="font-size:13px;font-weight:700;color:${step.present?'var(--text)':'var(--err)'}">${esc(step.step)}</div>
+        <div style="font-size:11px;color:var(--text-faint);font-family:'JetBrains Mono',monospace;margin-top:2px">${esc(step.domain||'')}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${esc(step.desc||'')}</div>
+      </div>
+      <span class="pill ${step.present?'ok':'err'}" style="flex-shrink:0">${step.present?'Present':'Missing'}</span>
+    </div>`).join('');
+
+  $('dnssecChainContent').innerHTML=`
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:14px;margin-bottom:14px">
+      <div class="card" style="padding:28px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center">
+        <div style="font-size:48px">${sc.icon}</div>
+        <div style="font-size:15px;font-weight:700;color:${sc.color}">${esc(sc.label)}</div>
+        <div style="font-size:12px;color:var(--text-muted)">${esc(data.statusMessage||'')}</div>
+      </div>
+      <div class="card" style="padding:20px;overflow:hidden">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Chain of Trust</div>
+        ${chainSteps}
+      </div>
+    </div>
+    ${issues.length?`<div class="card" style="padding:16px;border-color:rgba(239,68,68,.25);background:rgba(239,68,68,.04)">
+      <div style="font-size:12px;font-weight:700;color:var(--err);margin-bottom:8px">Issues</div>
+      ${issues.map(i=>`<div style="font-size:12px;color:var(--text-dim);padding:5px 0;display:flex;gap:8px"><span style="color:var(--err)">✗</span>${esc(i)}</div>`).join('')}
+    </div>`:''}`;
+}
+
+// ── Keyboard & search history events ──────────────────────────
+$('searchInput').addEventListener('keydown', e=>{ if(e.key==='Enter') runLookup(); });
+$('searchInput').addEventListener('focus', ()=>{ if(!$('searchInput').value) showHistoryDropdown(); });
+$('searchInput').addEventListener('input', ()=>{ if($('searchInput').value) hideHistoryDropdown(); else showHistoryDropdown(); });
+$('searchInput').addEventListener('blur', ()=>{ setTimeout(hideHistoryDropdown, 180); });
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape'){
+    document.getElementById('mobileNavOverlay')?.classList.remove('open');
+    closeCompare();
+    closeMonitor();
+    closeLogin();
+    closeBulk();
+    hideHistoryDropdown();
+  }
+});
+// Close overlays when clicking the backdrop (but not the panel).
+$('cmpOverlay').addEventListener('click', e=>{ if(e.target.id==='cmpOverlay') closeCompare(); });
+$('monOverlay').addEventListener('click', e=>{ if(e.target.id==='monOverlay') closeMonitor(); });
+$('loginOverlay').addEventListener('click', e=>{ if(e.target.id==='loginOverlay') closeLogin(); });
+$('bulkOverlay').addEventListener('click', e=>{ if(e.target.id==='bulkOverlay') closeBulk(); });
+
+// ── Plain-language explainers on every result pane ───────────────────────
+initExplainers();
+
+// ── Tab semantics + keyboard navigation ─────────────────────────────────
+// Give the category and sub-tab strips proper ARIA roles and Left/Right arrow
+// movement (WAI-ARIA tab pattern), so the whole report is keyboard-navigable.
+(function initTabA11y(){
+  document.querySelectorAll('.cat-tabs, .sub-tabs-group').forEach(strip=>{
+    strip.setAttribute('role','tablist');
+    strip.querySelectorAll('button').forEach(b=>{
+      b.setAttribute('role','tab');
+      if(!b.hasAttribute('aria-selected')) b.setAttribute('aria-selected','false');
+    });
+    strip.addEventListener('keydown', e=>{
+      if(e.key!=='ArrowRight' && e.key!=='ArrowLeft') return;
+      const btns=[...strip.querySelectorAll('button')].filter(b=>b.offsetParent!==null);
+      const i=btns.indexOf(document.activeElement);
+      if(i<0) return;
+      e.preventDefault();
+      const next=e.key==='ArrowRight' ? (i+1)%btns.length : (i-1+btns.length)%btns.length;
+      btns[next].focus(); btns[next].click();
+    });
+  });
+})();
+
+// ── URL query param auto-run (?q=domain / ?domain=domain / &tab=ssl) ─────
+(function(){
+  const p=new URLSearchParams(window.location.search);
+  const d=p.get('q')||p.get('domain');
+  if(d){ $('searchInput').value=d; window.__pendingTab=p.get('tab')||null; setTimeout(runLookup,120); }
+})();
+
+// ── Certificate Download ───────────────────────────────────────
+function downloadCert(index){
+  const chain=S.ssl?.certificate?.chain||[];
+  const cert=chain[index];
+  if(!cert?.pem){ toast('Certificate PEM data not available','warn'); return; }
+  const filename=`${cert.subject?.CN||'certificate'}_${index}.pem`.replace(/[^a-z0-9._-]/gi,'_');
+  downloadFile(cert.pem,filename,'application/x-pem-file');
+}
+
+function downloadFullChain(){
+  const chain=S.ssl?.certificate?.chain||[];
+  const pemData=chain.map(c=>c.pem).filter(Boolean).join('\n');
+  if(!pemData){ toast('Certificate chain PEM data not available','warn'); return; }
+  const domain=S.ssl?.host||'certificates';
+  const filename=`${domain}_chain.pem`.replace(/[^a-z0-9._-]/gi,'_');
+  downloadFile(pemData,filename,'application/x-pem-file');
+}
+
+function downloadFile(content,filename,mimeType){
+  const blob=new Blob([content],{type:mimeType});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ── Initialize icons ───────────────────────────────────────────
+lucide.createIcons();
