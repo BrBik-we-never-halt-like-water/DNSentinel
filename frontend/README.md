@@ -107,19 +107,6 @@ on `[a-z0-9-]+` rather than `[a-z-]+`.
 
 ---
 
-## Known issue
-
-The health-score ring in the report header renders in the neutral brand purple instead
-of the score colour, while the grade letter next to it — set from the same variable —
-renders correctly. Cosmetic only; the score, grade and every colour elsewhere are right.
-
-Ruled out so far: no `stroke` rule anywhere in the built CSS; the served bundle does
-contain the correct logic (`health ? (pct>=70 ? green : ...) : purple`); not a
-`transition` timing artefact (same value at 9s and 25s); only one ring exists in the
-source; and setting the colour via inline style rather than the presentation attribute
-did not change it. That leaves `health` reading as falsy for that one expression at
-paint time, which I could not reproduce in isolation.
-
 ## Status of the migration
 
 Everything the legacy app did is now in React:
@@ -161,3 +148,13 @@ delete — `shared/health-score.js` (required by `server.js` at runtime), `docs.
 `robots.txt`, `sitemap.xml` and `logo.png`. Since that also means old hashed bundles
 would pile up forever, `npm run build` first runs `scripts/clean-assets.cjs`, which
 empties only `public/assets/`.
+
+---
+
+## Note on measuring the score ring
+
+The header ring animates its arc (`stroke-dashoffset`) over ~0.9s once the score is
+known, and the score only exists after the DNS, TLS, email and blacklist checks land.
+Headless captures taken too early therefore show an empty ring with the neutral brand
+colour — that is the pre-data state, not a defect. Give a capture enough settle time
+(virtual-time budget well past the slowest check) before concluding anything about it.

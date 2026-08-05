@@ -1,25 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Route, Routes, useNavigate } from 'react-router-dom';
 import { Decor, Footer, Navbar } from './components/layout/AppShell.jsx';
-import { Faq, Features, Hero, Process, TrustStrip } from './components/sections/Landing.jsx';
-import { ResultsView } from './components/results/ResultsView.jsx';
+import { LandingPage } from './pages/LandingPage.jsx';
+import { ReportPage } from './pages/ReportPage.jsx';
 import { LoginModal } from './components/overlays/LoginModal.jsx';
 import { CompareModal } from './components/overlays/CompareModal.jsx';
 import { MonitorModal } from './components/overlays/MonitorModal.jsx';
 import { BulkModal } from './components/overlays/BulkModal.jsx';
-import { useScan } from './hooks/useScan.js';
 import { useToasts } from './hooks/useToasts.jsx';
 import { authApi, syncApi } from './utils/api.js';
-import { clearAccountCaches, isWatched, setSnaps, setWatch } from './utils/storage.js';
-import { saveSnapshot, gradeChangeNotice } from './utils/snapshots.js';
-import { addWatch, removeWatch } from './utils/monitor.js';
+import { clearAccountCaches, setSnaps, setWatch } from './utils/storage.js';
 
+/**
+ * App shell: session, navigation chrome and the overlays — all shared across routes.
+ *
+ * Routes:
+ *   /        landing page with the search
+ *   /report  one domain's report (?domain= drives the scan, ?tab= the section)
+ *
+ * `server.js` already answers every non-/api path with the SPA shell
+ * (`app.get('*')`), so /report survives a direct load or refresh with no backend
+ * change.
+ */
 export default function App() {
-  const { domain, data, analyzing, started, pending, run } = useScan();
   const { toast } = useToasts();
+  const navigate = useNavigate();
 
   const [user, setUser] = useState(null);
   const [overlay, setOverlay] = useState(null); // 'login' | 'compare' | 'monitor' | 'bulk'
-  const [watching, setWatching] = useState(false);
 
   /**
    * When signed in the server is the source of truth — pull history and alerts into
@@ -68,7 +76,6 @@ export default function App() {
     setUser(null);
     clearAccountCaches();
     setOverlay(null);
-    setWatching(false);
     toast('Signed out', 'info', 2000);
   };
 
@@ -85,56 +92,12 @@ export default function App() {
     }
   }, [toast, refreshAuth]);
 
-  /* ── ?domain= / ?tab= deep links, as the legacy app supported ─────────────── */
-  const [initialTab, setInitialTab] = useState(null);
-  useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
-    const d = p.get('domain');
-    const t = p.get('tab');
-    if (t) setInitialTab(t);
-    if (d) run(d);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /**
-   * Save a snapshot when a scan finishes and report any grade change against the
-   * previous snapshot for that domain (legacy saveSnapshot + notifyGradeChange).
-   * Keyed on the analyzing→idle transition so it fires exactly once per scan.
-   */
-  const wasAnalyzing = useRef(false);
-  useEffect(() => {
-    if (wasAnalyzing.current && !analyzing && domain) {
-      const prev = saveSnapshot(domain, data, { authenticated: !!user });
-      const notice = gradeChangeNotice(prev, domain, data);
-      if (notice) toast(notice.message, notice.type, notice.ms);
-      setWatching(isWatched(domain));
-    }
-    wasAnalyzing.current = analyzing;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analyzing, domain]);
-
-  // Keep the Watch button in sync with the watchlist (legacy syncWatchBtn).
-  useEffect(() => {
-    setWatching(domain ? isWatched(domain) : false);
-  }, [domain, overlay]);
-
-  const toggleWatch = () => {
-    if (!domain) { toast('Run an analysis first', 'warn'); return; }
-    if (isWatched(domain)) {
-      removeWatch(domain, { authenticated: !!user });
-      setWatching(false);
-      toast(`Stopped monitoring ${domain}`, 'info', 2200);
-    } else {
-      addWatch(domain, data, { authenticated: !!user });
-      setWatching(true);
-      toast(
-        user ? `Now monitoring ${domain} — email alerts on` : `Now monitoring ${domain} for changes`,
-        'ok'
-      );
-    }
-  };
-
   const close = () => setOverlay(null);
+  const overlayProps = {
+    onOpenCompare: () => setOverlay('compare'),
+    onOpenMonitor: () => setOverlay('monitor'),
+    onOpenBulk: () => setOverlay('bulk'),
+  };
 
   return (
     <>
@@ -142,36 +105,21 @@ export default function App() {
       <Navbar user={user} onSignIn={() => setOverlay('login')} onSignOut={signOut} />
 
       <main>
-        <Hero
-          onSubmit={run}
-          analyzing={analyzing}
-          onOpenCompare={() => setOverlay('compare')}
-          onOpenMonitor={() => setOverlay('monitor')}
-          onOpenBulk={() => setOverlay('bulk')}
-        />
-
-        {started && (
-          <ResultsView
-            domain={domain}
-            data={data}
-            analyzing={analyzing}
-            pending={pending}
-            initialTab={initialTab}
-            watching={watching}
-            onToggleWatch={toggleWatch}
-            onOpenCompare={() => setOverlay('compare')}
-            onOpenMonitor={() => setOverlay('monitor')}
+        <Routes>
+          <Route path="/" element={<LandingPage {...overlayProps} />} />
+          <Route
+            path="/report"
+            element={
+              <ReportPage
+                user={user}
+                onOpenCompare={overlayProps.onOpenCompare}
+                onOpenMonitor={overlayProps.onOpenMonitor}
+              />
+            }
           />
-        )}
-
-        {!started && (
-          <>
-            <TrustStrip />
-            <Features />
-            <Process />
-            <Faq />
-          </>
-        )}
+          {/* Unknown client paths fall back to the landing page. */}
+          <Route path="*" element={<LandingPage {...overlayProps} />} />
+        </Routes>
       </main>
 
       <Footer />
@@ -180,8 +128,8 @@ export default function App() {
       <CompareModal
         open={overlay === 'compare'}
         onClose={close}
-        currentDomain={domain}
-        onPickDomain={run}
+        currentDomain={new URLSearchParams(window.location.search).get('domain') || ''}
+        onPickDomain={(d) => navigate(`/report?domain=${encodeURIComponent(d)}`)}
       />
       <MonitorModal open={overlay === 'monitor'} onClose={close} user={user} />
       <BulkModal open={overlay === 'bulk'} onClose={close} />
