@@ -17,23 +17,8 @@ import { safeCopy } from '../../utils/format.js';
 import { getExplainPrefs, setExplainPref } from '../../utils/storage.js';
 import { useToasts } from '../../hooks/useToasts.jsx';
 import * as Panes from '../panes/index.jsx';
+import { ReportNav, CATEGORIES, TABS_BY_CAT, TAB_LABEL } from './ReportNav.jsx';
 
-/** Category → ordered tab ids, derived from TAB_CAT to stay in sync automatically. */
-const CATEGORIES = ['overview', ...Object.keys(CAT_LABEL)];
-const TABS_BY_CAT = Object.entries(TAB_CAT).reduce((acc, [tab, cat]) => {
-  (acc[cat] ||= []).push(tab);
-  return acc;
-}, {});
-
-const TAB_LABEL = {
-  dns: 'DNS', whois: 'WHOIS', geoip: 'GeoIP', propagation: 'Propagation',
-  ssl: 'SSL', security: 'Security', headers: 'Headers', csp: 'CSP', dnssec: 'DNSSEC',
-  'dnssec-chain': 'DNSSEC Chain', ocsp: 'OCSP', hsts: 'HSTS', takeover: 'Takeover',
-  emailsec: 'Email Auth', mx: 'MX', mtasts: 'MTA-STS',
-  ipv6: 'IPv6', trace: 'Trace', ports: 'Ports',
-  http: 'HTTP', redirect: 'Redirect', tech: 'Tech', cors: 'CORS', robots: 'Robots',
-  ct: 'CT Logs', typosquat: 'Typosquat',
-};
 
 /** Which state slot backs each tab (mirrors the legacy `go()` assignments). */
 const TAB_SLOT = {
@@ -76,7 +61,7 @@ const PANE_COMPONENTS = {
   ports: Panes.PortsPane,
 };
 
-export function ResultsView({ domain, data, analyzing, pending, initialTab, watching, onToggleWatch, onOpenCompare, onOpenMonitor }) {
+export function ResultsView({ domain, data, analyzing, pending, initialTab, watching, onToggleWatch, onOpenCompare, onOpenMonitor, onTabChange }) {
   const [cat, setCat] = useState(() => (initialTab && TAB_CAT[initialTab]) || 'overview');
   const [tab, setTab] = useState(() => (initialTab && TAB_CAT[initialTab] ? initialTab : 'overview'));
   const { toast } = useToasts();
@@ -87,28 +72,28 @@ export function ResultsView({ domain, data, analyzing, pending, initialTab, watc
   const catHealth = useMemo(() => tabHealth(data), [data]);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
 
-  // Mirror domain + tab into the URL so the page stays shareable as you navigate
-  // (legacy syncURL). replaceState, so it does not spam the history stack.
+  // The route owns the URL; just report the active tab upward.
   useEffect(() => {
-    if (!domain) return;
-    try {
-      const u = new URL(window.location.pathname, window.location.origin);
-      u.searchParams.set('domain', domain);
-      if (tab && tab !== 'overview') u.searchParams.set('tab', tab);
-      window.history.replaceState(null, '', u);
-    } catch {
-      /* ignore */
-    }
-  }, [domain, tab]);
+    onTabChange?.(tab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  // Opening a category lands on its first section.
+  const selectCat = (c) => {
+    setCat(c);
+    setTab(c === 'overview' ? 'overview' : TABS_BY_CAT[c][0]);
+  };
+
+  const sectionTitle = tab === 'overview' ? 'Report overview' : TAB_LABEL[tab] || tab;
 
   const goToTab = (t) => {
     setCat(TAB_CAT[t] || 'overview');
     setTab(t);
-    document.getElementById('report')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('report-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const share = async () => {
-    const url = `${location.origin}/?domain=${encodeURIComponent(domain)}${tab !== 'overview' ? `&tab=${tab}` : ''}`;
+    const url = `${location.origin}/report?domain=${encodeURIComponent(domain)}${tab !== 'overview' ? `&tab=${tab}` : ''}`;
     await safeCopy(url);
     toast('Report link copied', 'ok');
   };
@@ -179,79 +164,58 @@ export function ResultsView({ domain, data, analyzing, pending, initialTab, watc
 
       {breakdownOpen && <ScoreBreakdown health={health} onJump={goToTab} />}
 
-      <StatCards data={data} pending={pending} onJump={goToTab} />
-
-      <Scorecard
-        findings={findings}
-        health={health}
-        analyzing={analyzing}
-        domain={domain}
-        onJump={goToTab}
+      {/* Small screens: navigation as a strip above the content. */}
+      <ReportNav
+        variant="strip"
+        className="lg:hidden"
+        cat={cat}
+        tab={tab}
+        counts={counts}
+        catHealth={catHealth}
+        onSelectCat={selectCat}
+        onSelectTab={setTab}
       />
 
-      {/* Category strip */}
-      <Card className="mb-5 overflow-hidden p-0">
-        <div className="flex overflow-x-auto border-b border-line bg-surface-soft/60" role="tablist" aria-label="Report categories">
-          {CATEGORIES.map((c) => {
-            const active = cat === c;
-            const label = c === 'overview' ? 'Overview' : CAT_LABEL[c];
-            const n = c === 'overview' ? null : issueTotal(counts[c] || {});
-            return (
-              <button
-                key={c}
-                role="tab"
-                aria-selected={active}
-                onClick={() => {
-                  setCat(c);
-                  setTab(c === 'overview' ? 'overview' : TABS_BY_CAT[c][0]);
-                }}
-                className={`flex shrink-0 items-center gap-2 border-b-2 px-5 py-3.5 text-[13.5px] font-semibold transition-colors ${
-                  active
-                    ? 'border-brand bg-brand-50/70 text-brand'
-                    : 'border-transparent text-slateGray hover:bg-surface-muted hover:text-ink'
-                }`}
-              >
-                {label}
-                {c !== 'overview' && catHealth[c] && <HealthDot status={catHealth[c]} />}
-                {n != null && (
-                  <span
-                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                      n > 0 ? 'bg-state-warnSoft text-state-warn' : 'bg-state-okSoft text-state-ok'
-                    }`}
-                  >
-                    {n > 0 ? n : '✓'}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+      <div className="lg:grid lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-6">
+        <ReportNav
+          className="hidden lg:block"
+          cat={cat}
+          tab={tab}
+          counts={counts}
+          catHealth={catHealth}
+          onSelectCat={selectCat}
+          onSelectTab={setTab}
+        />
 
-        {/* Sub-tabs */}
-        {cat !== 'overview' && (
-          <div className="flex gap-1.5 overflow-x-auto bg-surface-soft/40 px-3 py-2.5">
-            {TABS_BY_CAT[cat].map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                aria-current={tab === t}
-                className={`shrink-0 rounded-lg px-3.5 py-2 text-[12.5px] font-medium transition-colors ${
-                  tab === t ? 'bg-brand text-white shadow-xs' : 'text-slateGray hover:bg-surface-muted hover:text-ink'
-                }`}
-              >
-                {TAB_LABEL[t]}
-              </button>
-            ))}
-          </div>
-        )}
-      </Card>
+        <section id="report-section" className="min-w-0 scroll-mt-24">
+          <header className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-display text-xl font-extrabold tracking-tight text-ink">
+              {sectionTitle}
+            </h2>
+            {cat !== 'overview' && (
+              <p className="text-[12.5px] text-slateGray">
+                {CAT_LABEL[cat]} · section {TABS_BY_CAT[cat].indexOf(tab) + 1} of {TABS_BY_CAT[cat].length}
+              </p>
+            )}
+          </header>
 
-      {/* Active pane */}
-      {tab === 'overview' ? (
-        <Overview findings={findings} health={health} counts={counts} analyzing={analyzing} onJump={goToTab} />
-      ) : (
-        <PaneHost tab={tab} data={data} pending={pending} />
-      )}
+          {tab === 'overview' ? (
+            <>
+              <StatCards data={data} pending={pending} onJump={goToTab} />
+              <Overview findings={findings} health={health} counts={counts} analyzing={analyzing} onJump={goToTab} />
+              <Scorecard
+                findings={findings}
+                health={health}
+                analyzing={analyzing}
+                domain={domain}
+                onJump={goToTab}
+              />
+            </>
+          ) : (
+            <PaneHost tab={tab} data={data} pending={pending} />
+          )}
+        </section>
+      </div>
     </div>
   );
 }
@@ -260,7 +224,6 @@ export function ResultsView({ domain, data, analyzing, pending, initialTab, watc
 
 function DomainHeader({ domain, health, analyzing, onShare, onExport, onPdf, onCompare, onMonitor, watching, onToggleWatch, breakdownOpen, onToggleBreakdown }) {
   const pct = health?.pct ?? 0;
-  const circumference = 2 * Math.PI * 34;
   /**
    * Ring / grade colour straight from the percentage, using the legacy score bands
    * (>=85 good, >=70 acceptable, >=50 warning, else bad). Deriving it from `pct` rather
@@ -303,18 +266,21 @@ function DomainHeader({ domain, health, analyzing, onShare, onExport, onPdf, onC
             <div className="relative h-[84px] w-[84px] shrink-0">
               <svg viewBox="0 0 80 80" className="h-full w-full -rotate-90">
                 <circle cx="40" cy="40" r="34" fill="none" stroke="#E2E8F0" strokeWidth="6" />
-                {/* stroke is set via inline style, not the presentation attribute:
-                    a stylesheet rule outranks the attribute and was repainting this
-                    ring with the neutral brand colour while the grade beside it — set
-                    from the same variable via style — rendered correctly. */}
+                {/*
+                  pathLength="100" normalises the geometry so the dash values are plain
+                  percentages — dasharray 100, offset 100-pct. Mixing a pixel-based
+                  dasharray attribute with a CSS transition previously left the offset
+                  pinned at the full circumference, which drew no arc at all (the colour
+                  was always correct; the arc was simply invisible).
+                */}
                 <circle
-                  cx="40" cy="40" r="34" fill="none"
+                  cx="40" cy="40" r="34" fill="none" pathLength="100"
                   strokeWidth="6" strokeLinecap="round"
-                  strokeDasharray={circumference}
-                  strokeDashoffset={circumference - (circumference * pct) / 100}
                   style={{
                     stroke: toneStroke,
-                    transition: 'stroke-dashoffset 1.2s cubic-bezier(.4,0,.2,1), stroke .4s',
+                    strokeDasharray: 100,
+                    strokeDashoffset: 100 - Math.max(0, Math.min(100, pct)),
+                    transition: 'stroke-dashoffset .9s cubic-bezier(.4,0,.2,1), stroke .3s',
                   }}
                 />
               </svg>
