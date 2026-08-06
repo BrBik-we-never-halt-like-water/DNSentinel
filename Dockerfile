@@ -1,3 +1,18 @@
+# Stage 1: build the React/Vite frontend from source. public/ used to be shipped as
+# whatever a dev last built and committed locally — that violates "build from a clean
+# checkout" (the image could silently drift from src/). Building it here means the
+# image always reflects the committed frontend/src, not a committed dist/.
+FROM node:20-slim AS frontend-builder
+WORKDIR /app
+COPY frontend/package*.json frontend/
+RUN cd frontend && npm ci
+# public/ holds files the build must never touch (docs.html, shared/health-score.js,
+# sw.js, etc. — see frontend/vite.config.js) alongside the files vite.config.js DOES
+# generate (index.html, assets/) — copy it in before the build regenerates the latter.
+COPY public/ ./public/
+COPY frontend/ ./frontend/
+RUN cd frontend && npm run build
+
 # Debian-glibc base (not alpine/musl). Two reasons this is more robust than node:20-alpine:
 #   1. better-sqlite3 ships glibc prebuilt binaries, so the normal install path needs no
 #      compiler at all (fast, no source build).
@@ -19,6 +34,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY . .
+# Overwrite the committed public/ with the freshly built one from stage 1.
+COPY --from=frontend-builder /app/public ./public
 
 # Persistent data (SQLite DB: users, history, alerts). Mount a volume here so it
 # survives container restarts:  docker run -v dnsentinel_data:/app/data ...

@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "node scripts/clean-assets.cjs && vite build",
     "preview": "vite preview",
-    "lint": "eslint src --ext .js,.jsx"
+    "lint": "eslint src --ext .js,.jsx",
+    "test": "node tests/findings-parity.test.mjs"
   },
   "dependencies": {
     "framer-motion": "^11.15.0",
